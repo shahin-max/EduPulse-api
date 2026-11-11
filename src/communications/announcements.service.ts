@@ -320,6 +320,9 @@ export class AnnouncementsService {
           ...faculty.map((f) => f.faculty_user_id),
         ];
       }
+      case 'BRANCH':
+        // Cannot be created yet (see batchRuleError), so there is nobody to notify.
+        return [];
     }
   }
 

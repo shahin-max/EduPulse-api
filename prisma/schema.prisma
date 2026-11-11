@@ -1,7 +1,8 @@
 // EduPulse Academy LMS - mirrors the hand-designed `edupulse_lms` MySQL schema.
 // Table and column names are the database's own (snake_case). CHECK constraints and
-// ON UPDATE timestamps live in prisma/migrations/0_init/migration.sql; Prisma cannot
-// express them, so do not regenerate that migration from this file.
+// ON UPDATE timestamps live in prisma/migrations/*/migration.sql; Prisma cannot
+// express them, so do not regenerate those migrations from this file.
+// Multi-branch support: see prisma/migrations/1_branches/migration.sql.
 // The connection URL lives in prisma.config.ts (Prisma 7 style).
 
 generator client {
@@ -21,6 +22,8 @@ model admission_enquiries {
   email                String?                    @db.VarChar(254)
   mobile               String                     @db.VarChar(20)
   interested_course_id BigInt?                    @db.UnsignedBigInt
+  /// Preferred branch; NULL when the visitor didn't choose one (head office routes it).
+  branch_id            BigInt?                    @db.UnsignedBigInt
   message              String?                    @db.Text
   source               String?                    @db.VarChar(64)
   status               admission_enquiries_status @default(NEW)
@@ -28,9 +31,11 @@ model admission_enquiries {
   created_at           DateTime                   @default(now())
   updated_at           DateTime                   @default(now())
   users                users?                     @relation(fields: [assigned_to], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enquiries_assignee")
+  branches             branches?                  @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enquiries_branch")
   courses              courses?                   @relation(fields: [interested_course_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enquiries_course")
 
   @@index([assigned_to], map: "fk_enquiries_assignee")
+  @@index([branch_id, status, created_at], map: "idx_enquiries_branch")
   @@index([interested_course_id], map: "idx_enquiries_course")
   @@index([status, created_at], map: "idx_enquiries_status")
 }
@@ -42,14 +47,17 @@ model announcements {
   body       String                 @db.Text
   audience   announcements_audience @default(ALL)
   batch_id   BigInt?                @db.UnsignedBigInt
+  branch_id  BigInt?                @db.UnsignedBigInt
   status     announcements_status   @default(DRAFT)
   publish_at DateTime?
   created_by BigInt?                @db.UnsignedBigInt
   created_at DateTime               @default(now())
   batches    batches?               @relation(fields: [batch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_announcement_batch")
+  branches   branches?              @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_announcement_branch")
   users      users?                 @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_announcement_creator")
 
   @@index([batch_id], map: "fk_announcement_batch")
+  @@index([branch_id, status, publish_at], map: "idx_announcements_branch")
   @@index([created_by], map: "fk_announcement_creator")
   @@index([status, publish_at], map: "idx_announcements_status")
 }
@@ -126,17 +134,20 @@ model attempt_answers {
 }
 
 model audit_logs {
-  id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  actor_user_id BigInt?  @db.UnsignedBigInt
-  action        String   @db.VarChar(100)
-  entity_type   String   @db.VarChar(80)
-  entity_id     String?  @db.VarChar(80)
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  actor_user_id BigInt?   @db.UnsignedBigInt
+  branch_id     BigInt?   @db.UnsignedBigInt
+  action        String    @db.VarChar(100)
+  entity_type   String    @db.VarChar(80)
+  entity_id     String?   @db.VarChar(80)
   metadata      Json?
-  ip_address    String?  @db.VarChar(45)
-  created_at    DateTime @default(now())
-  users         users?   @relation(fields: [actor_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_audit_actor")
+  ip_address    String?   @db.VarChar(45)
+  created_at    DateTime  @default(now())
+  users         users?    @relation(fields: [actor_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_audit_actor")
+  branches      branches? @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_audit_branch")
 
   @@index([actor_user_id, created_at], map: "idx_audit_actor")
+  @@index([branch_id, created_at], map: "idx_audit_branch")
   @@index([entity_type, entity_id], map: "idx_audit_entity")
 }
 
@@ -183,6 +194,7 @@ model batch_faculty {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model batches {
   id             BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
+  branch_id      BigInt           @db.UnsignedBigInt
   course_id      BigInt           @db.UnsignedBigInt
   code           String           @unique(map: "uq_batches_code") @db.VarChar(50)
   name           String           @db.VarChar(160)
@@ -195,13 +207,72 @@ model batches {
   announcements  announcements[]
   assignments    assignments[]
   batch_faculty  batch_faculty[]
+  branches       branches         @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_batches_branch")
   courses        courses          @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_batches_course")
   class_sessions class_sessions[]
   enrollments    enrollments[]
   exam_batches   exam_batches[]
   fee_plans      fee_plans[]
 
+  @@unique([id, branch_id], map: "uq_batch_branch")
+  @@index([branch_id, status], map: "idx_batches_branch")
   @@index([course_id, status], map: "idx_batches_course")
+}
+
+/// Which courses each branch offers (drives the enquiry form and branch pages).
+model branch_courses {
+  branch_id  BigInt   @db.UnsignedBigInt
+  course_id  BigInt   @db.UnsignedBigInt
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  branches   branches @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_branch_courses_branch")
+  courses    courses  @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_branch_courses_course")
+
+  @@id([branch_id, course_id])
+  @@index([course_id], map: "fk_branch_courses_course")
+}
+
+/// Which staff member holds which role at which branch. Global roles (SUPER_ADMIN) stay in user_roles.
+model branch_staff {
+  user_id     BigInt   @db.UnsignedBigInt
+  branch_id   BigInt   @db.UnsignedBigInt
+  role_id     Int      @db.UnsignedSmallInt
+  assigned_at DateTime @default(now())
+  branches    branches @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_branch_staff_branch")
+  roles       roles    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_branch_staff_role")
+  users       users    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_branch_staff_user")
+
+  @@id([user_id, branch_id, role_id])
+  @@index([branch_id, role_id], map: "idx_branch_staff_branch")
+  @@index([role_id], map: "fk_branch_staff_role")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model branches {
+  id                  BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  code                String                @unique(map: "uq_branches_code") @db.VarChar(20)
+  name                String                @db.VarChar(160)
+  invoice_prefix      String                @db.VarChar(10)
+  receipt_prefix      String                @db.VarChar(10)
+  address             String?               @db.Text
+  city                String?               @db.VarChar(80)
+  state               String?               @db.VarChar(80)
+  pincode             String?               @db.VarChar(10)
+  phone               String?               @db.VarChar(20)
+  email               String?               @db.VarChar(254)
+  gstin               String?               @db.VarChar(15)
+  is_active           Boolean               @default(true)
+  created_at          DateTime              @default(now())
+  updated_at          DateTime              @default(now())
+  admission_enquiries admission_enquiries[]
+  announcements       announcements[]
+  audit_logs          audit_logs[]
+  batches             batches[]
+  branch_courses      branch_courses[]
+  branch_staff        branch_staff[]
+  document_sequences  document_sequences[]
+  fee_plans           fee_plans[]
+  student_profiles    student_profiles[]
 }
 
 model chapters {
@@ -291,6 +362,7 @@ model courses {
   updated_at          DateTime              @default(now())
   admission_enquiries admission_enquiries[]
   batches             batches[]
+  branch_courses      branch_courses[]
   course_subjects     course_subjects[]
   file_assets         file_assets?          @relation(fields: [thumbnail_asset_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_course_thumbnail")
   users               users?                @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_courses_creator")
@@ -302,11 +374,27 @@ model courses {
   @@index([status, sort_order], map: "idx_courses_status")
 }
 
+/// Gap-free per-branch numbering (e.g. HYD/INV/2026-27/00042).
+/// Read with SELECT ... FOR UPDATE inside the transaction that creates the invoice/payment.
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model document_sequences {
+  branch_id   BigInt                      @db.UnsignedBigInt
+  doc_type    document_sequences_doc_type
+  fiscal_year String                      @db.Char(7)
+  next_value  Int                         @default(1) @db.UnsignedInt
+  updated_at  DateTime                    @default(now())
+  branches    branches                    @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_docseq_branch")
+
+  @@id([branch_id, doc_type, fiscal_year])
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model enrollments {
   id                     BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
   student_user_id        BigInt                   @db.UnsignedBigInt
   batch_id               BigInt                   @db.UnsignedBigInt
+  /// Copied from the batch; the composite FK guarantees it matches.
+  branch_id              BigInt                   @db.UnsignedBigInt
   status                 enrollments_status       @default(PENDING)
   enrolled_at            DateTime                 @default(now())
   completed_at           DateTime?
@@ -316,7 +404,7 @@ model enrollments {
   created_by             BigInt?                  @db.UnsignedBigInt
   assignment_submissions assignment_submissions[]
   class_attendance       class_attendance[]
-  batches                batches                  @relation(fields: [batch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enrollments_batch")
+  batches                batches                  @relation(fields: [batch_id, branch_id], references: [id, branch_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enrollments_batch")
   users                  users?                   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enrollments_creator")
   student_profiles       student_profiles         @relation(fields: [student_user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enrollments_student")
   exam_attempts          exam_attempts[]
@@ -325,8 +413,11 @@ model enrollments {
 
   @@unique([student_user_id, batch_id], map: "uq_enrollment")
   @@unique([id, batch_id], map: "uq_enrollment_batch")
+  @@unique([id, branch_id], map: "uq_enrollment_branch")
   @@index([created_by], map: "fk_enrollments_creator")
   @@index([batch_id, status], map: "idx_enrollments_batch")
+  @@index([batch_id, branch_id], map: "fk_enrollments_batch")
+  @@index([branch_id, status], map: "idx_enrollments_branch")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -440,6 +531,7 @@ model fee_invoices {
   id              BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
   invoice_number  String              @unique(map: "uq_invoice_number") @db.VarChar(50)
   enrollment_id   BigInt              @db.UnsignedBigInt
+  branch_id       BigInt              @db.UnsignedBigInt
   fee_plan_id     BigInt?             @db.UnsignedBigInt
   description     String?             @db.VarChar(255)
   gross_amount    Decimal             @db.Decimal(12, 2)
@@ -450,18 +542,23 @@ model fee_invoices {
   status          fee_invoices_status @default(DRAFT)
   issued_at       DateTime?
   created_at      DateTime            @default(now())
-  enrollments     enrollments         @relation(fields: [enrollment_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_enrollment")
+  enrollments     enrollments         @relation(fields: [enrollment_id, branch_id], references: [id, branch_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_enrollment")
   fee_plans       fee_plans?          @relation(fields: [fee_plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_plan")
   payments        payments[]
 
+  @@unique([id, branch_id], map: "uq_invoice_branch")
   @@index([fee_plan_id], map: "fk_invoice_plan")
   @@index([enrollment_id, status], map: "idx_invoice_enrollment")
+  @@index([enrollment_id, branch_id], map: "fk_invoice_enrollment")
+  @@index([branch_id, status, due_date], map: "idx_invoice_branch")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model fee_plans {
   id           BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
   course_id    BigInt         @db.UnsignedBigInt
+  /// NULL = applies to every branch; set it for branch-specific pricing.
+  branch_id    BigInt?        @db.UnsignedBigInt
   batch_id     BigInt?        @db.UnsignedBigInt
   title        String         @db.VarChar(160)
   currency     String         @default("INR") @db.Char(3)
@@ -469,10 +566,12 @@ model fee_plans {
   is_active    Boolean        @default(true)
   created_at   DateTime       @default(now())
   fee_invoices fee_invoices[]
-  batches      batches?       @relation(fields: [batch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_fee_plan_batch")
+  branches     branches?      @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_fee_plan_branch")
+  batches      batches?       @relation(fields: [batch_id, branch_id], references: [id, branch_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_fee_plan_batch")
   courses      courses        @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_fee_plan_course")
 
-  @@index([batch_id], map: "fk_fee_plan_batch")
+  @@index([batch_id, branch_id], map: "fk_fee_plan_batch")
+  @@index([branch_id, course_id], map: "fk_fee_plan_branch")
   @@index([course_id, batch_id], map: "idx_fee_plans_course")
 }
 
@@ -547,6 +646,7 @@ model payment_refunds {
 model payments {
   id                 BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
   invoice_id         BigInt            @db.UnsignedBigInt
+  branch_id          BigInt            @db.UnsignedBigInt
   amount             Decimal           @db.Decimal(12, 2)
   currency           String            @default("INR") @db.Char(3)
   method             payments_method
@@ -560,12 +660,14 @@ model payments {
   notes              String?           @db.Text
   created_at         DateTime          @default(now())
   payment_refunds    payment_refunds[]
-  fee_invoices       fee_invoices      @relation(fields: [invoice_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_payment_invoice")
+  fee_invoices       fee_invoices      @relation(fields: [invoice_id, branch_id], references: [id, branch_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_payment_invoice")
   users              users?            @relation(fields: [recorded_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_payment_recorder")
 
   @@unique([provider, external_reference], map: "uq_payment_provider_ref")
   @@index([recorded_by], map: "fk_payment_recorder")
   @@index([invoice_id, status], map: "idx_payments_invoice")
+  @@index([invoice_id, branch_id], map: "fk_payment_invoice")
+  @@index([branch_id, status, paid_at], map: "idx_payments_branch")
   @@index([external_reference], map: "idx_payments_ref")
 }
 
@@ -609,14 +711,17 @@ model questions {
 }
 
 model roles {
-  id         Int          @id @default(autoincrement()) @db.UnsignedSmallInt
-  code       String       @unique(map: "uq_roles_code") @db.VarChar(32)
-  label      String       @db.VarChar(80)
-  user_roles user_roles[]
+  id           Int            @id @default(autoincrement()) @db.UnsignedSmallInt
+  code         String         @unique(map: "uq_roles_code") @db.VarChar(32)
+  label        String         @db.VarChar(80)
+  branch_staff branch_staff[]
+  user_roles   user_roles[]
 }
 
 model student_profiles {
   user_id          BigInt        @id @db.UnsignedBigInt
+  /// Branch that registered the student; lets branch admins see students before/without an enrollment.
+  home_branch_id   BigInt?       @db.UnsignedBigInt
   admission_number String?       @unique(map: "uq_student_admission") @db.VarChar(40)
   date_of_birth    DateTime?     @db.Date
   grade            String?       @db.VarChar(30)
@@ -628,7 +733,10 @@ model student_profiles {
   created_at       DateTime      @default(now())
   updated_at       DateTime      @default(now())
   enrollments      enrollments[]
+  branches         branches?     @relation(fields: [home_branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_student_home_branch")
   users            users         @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_student_user")
+
+  @@index([home_branch_id], map: "idx_student_home_branch")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -700,6 +808,7 @@ model users {
   audit_logs             audit_logs[]
   auth_sessions          auth_sessions[]
   auth_tokens            auth_tokens[]
+  branch_staff           branch_staff[]
   class_attendance       class_attendance[]
   courses                courses[]
   enrollments            enrollments[]
@@ -748,6 +857,7 @@ enum announcements_audience {
   FACULTY
   STUDENTS
   BATCH
+  BRANCH
 }
 
 enum class_attendance_status {
@@ -755,6 +865,12 @@ enum class_attendance_status {
   ABSENT
   LATE
   EXCUSED
+}
+
+enum document_sequences_doc_type {
+  INVOICE
+  RECEIPT
+  ADMISSION
 }
 
 enum enrollments_status {

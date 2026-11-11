@@ -4,6 +4,7 @@ coverage/
 src/generated/
 .env
 .env.test
+.env.*.bak
 *.log
 *.tsbuildinfo
 uploads/

@@ -74,7 +74,7 @@ export class EnrollmentsService {
           'studentUserId must belong to an active student',
         );
       }
-      await lockBatchWithSeat(tx, batchId);
+      const { branch_id: branchId } = await lockBatchWithSeat(tx, batchId);
 
       const existing = await tx.enrollments.findUnique({
         where: {
@@ -102,7 +102,13 @@ export class EnrollmentsService {
             include: enrollmentInclude,
           })
         : tx.enrollments.create({
-            data: { ...data, student_user_id: studentId, batch_id: batchId },
+            data: {
+              ...data,
+              student_user_id: studentId,
+              batch_id: batchId,
+              // Copied from the batch; the composite foreign key keeps them equal.
+              branch_id: branchId,
+            },
             include: enrollmentInclude,
           });
     });
@@ -182,7 +188,7 @@ export class EnrollmentsService {
 export async function lockBatchWithSeat(
   tx: Tx,
   batchId: bigint,
-): Promise<void> {
+): Promise<{ branch_id: bigint }> {
   const rows = await tx.$queryRaw<
     { id: bigint }[]
   >`SELECT id FROM batches WHERE id = ${batchId} FOR UPDATE`;
@@ -190,7 +196,7 @@ export async function lockBatchWithSeat(
     throw new BadRequestException('batchId does not match any batch');
   const batch = await tx.batches.findUniqueOrThrow({
     where: { id: batchId },
-    select: { capacity: true, status: true },
+    select: { capacity: true, status: true, branch_id: true },
   });
   if (batch.status === 'COMPLETED' || batch.status === 'CANCELLED') {
     throw new BadRequestException('This batch is not accepting enrollments');
@@ -202,6 +208,7 @@ export async function lockBatchWithSeat(
     if (taken >= batch.capacity)
       throw new ConflictException('This batch is full');
   }
+  return { branch_id: batch.branch_id };
 }
 
 /** Mirrors chk_enrollment_access. */

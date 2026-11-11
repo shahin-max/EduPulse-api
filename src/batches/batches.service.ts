@@ -20,6 +20,7 @@ import {
 export const SEAT_STATUSES = ['PENDING', 'ACTIVE'] as const;
 
 const batchInclude = {
+  branches: { select: { id: true, code: true, name: true } },
   courses: { select: { id: true, code: true, slug: true, title: true } },
   batch_faculty: {
     select: {
@@ -78,6 +79,8 @@ export class BatchesService {
     const where: Prisma.batchesWhereInput = {
       ...visibility,
       ...idFilter,
+      branch_id:
+        query.branchId === undefined ? undefined : BigInt(query.branchId),
       course_id:
         query.courseId === undefined ? undefined : BigInt(query.courseId),
       ...(query.status ? { status: query.status } : {}),
@@ -128,10 +131,12 @@ export class BatchesService {
   }
 
   async create(dto: CreateBatchDto) {
+    await this.assertBranch(dto.branchId);
     await this.assertCourse(dto.courseId);
     assertDates(dto.startDate, dto.endDate);
     const batch = await this.prisma.batches.create({
       data: {
+        branch_id: BigInt(dto.branchId),
         course_id: BigInt(dto.courseId),
         code: dto.code,
         name: dto.name,
@@ -306,6 +311,17 @@ export class BatchesService {
         },
       },
     });
+  }
+
+  private async assertBranch(branchId: number): Promise<void> {
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: BigInt(branchId) },
+      select: { is_active: true },
+    });
+    if (!branch)
+      throw new BadRequestException('branchId does not match any branch');
+    if (!branch.is_active)
+      throw new BadRequestException('Cannot add a batch to an inactive branch');
   }
 
   private async assertCourse(courseId: number): Promise<void> {

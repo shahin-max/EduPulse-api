@@ -115,6 +115,16 @@ export async function createUser(
  * Builds a course with one subject and a batch, and assigns `facultyId` (if given) to teach
  * that subject. Returns the ids. Handy starting point for batch-scoped e2e tests.
  */
+/** The branch test batches belong to. wipe() deletes branches too, so it is recreated on demand. */
+export async function testBranchId(ctx: TestContext): Promise<number> {
+  const branch = await ctx.prisma.branches.upsert({
+    where: { code: 'TEST' },
+    create: { code: 'TEST', name: 'Test Branch', invoice_prefix: 'TST', receipt_prefix: 'TST' },
+    update: {},
+  });
+  return Number(branch.id);
+}
+
 export async function createCourseWithBatch(
   ctx: TestContext,
   opts: {
@@ -143,6 +153,7 @@ export async function createCourseWithBatch(
   });
   const batch = await ctx.prisma.batches.create({
     data: {
+      branch_id: BigInt(await testBranchId(ctx)),
       course_id: course.id,
       code: `B${counter}X${Date.now() % 100000}`,
       name: `Batch ${counter}`,
@@ -173,10 +184,15 @@ export async function enrol(
   studentId: number,
   batchId: number,
 ): Promise<number> {
+  const batch = await ctx.prisma.batches.findUniqueOrThrow({
+    where: { id: BigInt(batchId) },
+    select: { branch_id: true },
+  });
   const enrollment = await ctx.prisma.enrollments.create({
     data: {
       student_user_id: BigInt(studentId),
       batch_id: BigInt(batchId),
+      branch_id: batch.branch_id,
       status: 'ACTIVE',
     },
   });

@@ -72,10 +72,11 @@ export class FeesService {
     });
     if (!course)
       throw new BadRequestException('courseId does not match any course');
-    await this.assertBatchOfCourse(courseId, dto.batchId);
+    const branchId = await this.planBranch(courseId, dto.batchId, dto.branchId);
     return this.prisma.fee_plans.create({
       data: {
         course_id: courseId,
+        branch_id: branchId,
         batch_id: dto.batchId == null ? null : BigInt(dto.batchId),
         title: dto.title,
         currency: dto.currency,
@@ -111,11 +112,15 @@ export class FeesService {
   /** Changing the amount does not touch invoices already raised from the plan. */
   async updatePlan(id: bigint, dto: UpdateFeePlanDto) {
     const plan = await this.getPlan(id);
-    if (dto.batchId !== undefined)
-      await this.assertBatchOfCourse(plan.course_id, dto.batchId);
+    // Moving a plan onto a batch also moves it to that batch's branch.
+    const batchBranch =
+      dto.batchId === undefined || dto.batchId === null
+        ? undefined
+        : await this.assertBatchOfCourse(plan.course_id, dto.batchId);
     return this.prisma.fee_plans.update({
       where: { id },
       data: {
+        branch_id: batchBranch,
         batch_id:
           dto.batchId === undefined
             ? undefined
@@ -137,6 +142,7 @@ export class FeesService {
       select: {
         id: true,
         batch_id: true,
+        branch_id: true,
         batches: { select: { course_id: true } },
       },
     });
@@ -158,7 +164,8 @@ export class FeesService {
         );
       if (
         plan.course_id !== enrollment.batches.course_id ||
-        (plan.batch_id !== null && plan.batch_id !== enrollment.batch_id)
+        (plan.batch_id !== null && plan.batch_id !== enrollment.batch_id) ||
+        (plan.branch_id !== null && plan.branch_id !== enrollment.branch_id)
       ) {
         throw new BadRequestException(
           "This fee plan does not apply to the enrollment's batch",
@@ -181,6 +188,7 @@ export class FeesService {
         data: {
           invoice_number: `TMP-${randomUUID()}`,
           enrollment_id: enrollment.id,
+          branch_id: enrollment.branch_id,
           fee_plan_id:
             dto.feePlanId === undefined ? null : BigInt(dto.feePlanId),
           description,
@@ -369,6 +377,7 @@ export class FeesService {
         const payment = await tx.payments.create({
           data: {
             invoice_id: invoiceId,
+            branch_id: invoice.branch_id,
             amount,
             currency: invoice.fee_plans?.currency ?? 'INR',
             method: dto.method,
@@ -588,19 +597,47 @@ export class FeesService {
     return existing;
   }
 
+  /** Returns the batch's branch after checking the batch belongs to the course. */
   private async assertBatchOfCourse(
     courseId: bigint,
-    batchId?: number | null,
-  ): Promise<void> {
-    if (batchId === undefined || batchId === null) return;
+    batchId: number,
+  ): Promise<bigint> {
     const batch = await this.prisma.batches.findUnique({
       where: { id: BigInt(batchId) },
-      select: { course_id: true },
+      select: { course_id: true, branch_id: true },
     });
     if (!batch || batch.course_id !== courseId)
       throw new BadRequestException(
         'batchId must be a batch of the same course',
       );
+    return batch.branch_id;
+  }
+
+  /**
+   * Branch of a new plan: a batch plan belongs to the batch's branch; otherwise the given
+   * branch, or null for a plan that applies to every branch.
+   */
+  private async planBranch(
+    courseId: bigint,
+    batchId?: number | null,
+    branchId?: number,
+  ): Promise<bigint | null> {
+    if (batchId !== undefined && batchId !== null) {
+      const batchBranch = await this.assertBatchOfCourse(courseId, batchId);
+      if (branchId !== undefined && BigInt(branchId) !== batchBranch)
+        throw new BadRequestException(
+          'branchId must match the branch of the batch',
+        );
+      return batchBranch;
+    }
+    if (branchId === undefined) return null;
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: BigInt(branchId) },
+      select: { id: true },
+    });
+    if (!branch)
+      throw new BadRequestException('branchId does not match any branch');
+    return branch.id;
   }
 
   private async getInvoiceRow(id: bigint) {

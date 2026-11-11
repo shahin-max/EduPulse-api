@@ -1,4 +1,4 @@
-import { PartialType } from '@nestjs/swagger';
+import { OmitType, PartialType } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
@@ -20,6 +20,11 @@ import { PaginationQueryDto, toBoolean } from '../../common/pagination.js';
 import { CODE_REGEX, trim, upperTrim } from '../../common/validation.js';
 
 export class CreateBatchDto {
+  /** Branch that runs the batch. It cannot be changed later: enrollments, invoices and payments are tied to it. */
+  @IsInt()
+  @Min(1)
+  branchId: number;
+
   @IsInt()
   @Min(1)
   courseId: number;
@@ -60,9 +65,16 @@ export class CreateBatchDto {
   status?: batches_status;
 }
 
-export class UpdateBatchDto extends PartialType(CreateBatchDto) {}
+export class UpdateBatchDto extends PartialType(
+  OmitType(CreateBatchDto, ['branchId'] as const),
+) {}
 
 export class ListBatchesQueryDto extends PaginationQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  branchId?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

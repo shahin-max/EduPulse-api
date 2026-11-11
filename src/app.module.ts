@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
 import { CatalogModule } from './catalog/catalog.module.js';
 import { BatchesModule } from './batches/batches.module.js';
+import { BranchesModule } from './branches/branches.module.js';
 import { WebsiteModule } from './website/website.module.js';
 import { LearningModule } from './learning/learning.module.js';
 import { ExamsModule } from './exams/exams.module.js';
@@ -38,6 +39,7 @@ import { HealthController } from './health/health.controller.js';
     AuthModule,
     UsersModule,
     CatalogModule,
+    BranchesModule,
     BatchesModule,
     WebsiteModule,
     LearningModule,

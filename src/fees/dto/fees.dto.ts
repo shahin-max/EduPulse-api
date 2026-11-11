@@ -30,6 +30,12 @@ export class CreateFeePlanDto {
   @Min(1)
   courseId: number;
 
+  /** Optional: branch-specific pricing. Omit for a plan that applies to every branch. A batch plan always uses its batch's branch. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  branchId?: number;
+
   /** Optional: a plan for one batch of the course only. */
   @IsOptional()
   @IsInt()

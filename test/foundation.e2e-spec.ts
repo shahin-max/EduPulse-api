@@ -4,6 +4,7 @@ import {
   closeTestApp,
   createTestApp,
   createUser,
+  testBranchId,
   type TestContext,
 } from './helpers.js';
 
@@ -395,10 +396,17 @@ describe('Foundation (e2e)', () => {
 
   describe('batches and enrollments', () => {
     it('creates a batch and assigns faculty per subject', async () => {
+      id.branch = await testBranchId(ctx);
+      await http()
+        .post(api('/batches'))
+        .set(bearer(t.admin))
+        .send({ courseId: id.course, code: 'no-branch', name: 'No branch' })
+        .expect(400);
       await http()
         .post(api('/batches'))
         .set(bearer(t.admin))
         .send({
+          branchId: id.branch,
           courseId: id.course,
           code: 'bad',
           name: 'Bad dates',
@@ -410,6 +418,7 @@ describe('Foundation (e2e)', () => {
         .post(api('/batches'))
         .set(bearer(t.admin))
         .send({
+          branchId: id.branch,
           courseId: id.course,
           code: 'jee-27-m',
           name: 'JEE 2027 Morning',

@@ -47,6 +47,10 @@ export function batchRuleError(
   audience: announcements_audience,
   batchId: bigint | null | undefined,
 ): string | null {
+  // The BRANCH audience exists in the schema, but who belongs to a branch (and may read or post
+  // to it) is not decided yet, so it is refused until branch membership is implemented.
+  if (audience === 'BRANCH')
+    return 'BRANCH announcements are not available yet';
   if (audience === 'BATCH' && (batchId === null || batchId === undefined))
     return 'batchId is required when audience is BATCH';
   if (audience !== 'BATCH' && batchId !== null && batchId !== undefined)
