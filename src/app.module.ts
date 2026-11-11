@@ -4,6 +4,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { validateEnv } from './config/env.validation.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { AppMailModule } from './mail/mail.module.js';
 import { AccessModule } from './common/access.service.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { RolesGuard } from './common/guards/roles.guard.js';
@@ -35,6 +36,7 @@ import { HealthController } from './health/health.controller.js';
       skipIf: () => process.env.NODE_ENV === 'test',
     }),
     PrismaModule,
+    AppMailModule,
     AccessModule,
     AuthModule,
     UsersModule,

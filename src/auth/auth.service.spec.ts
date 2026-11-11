@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import type { Mailer } from '@nestjs/mail';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { AuthService, sameHash } from './auth.service.js';
 import { OneTimeTokenService, sha256 } from './one-time-token.service.js';
@@ -60,6 +61,7 @@ function setup() {
   const tokens = new OneTimeTokenService(
     prisma as unknown as PrismaService,
     config,
+    { send: vi.fn().mockResolvedValue({}) } as unknown as Mailer,
   );
   const service = new AuthService(
     prisma as unknown as PrismaService,
@@ -214,6 +216,7 @@ describe('OneTimeTokenService', () => {
     const tokens = new OneTimeTokenService(
       prisma as unknown as PrismaService,
       config,
+      { send: vi.fn().mockResolvedValue({}) } as unknown as Mailer,
     );
     const base = {
       id: 5n,
@@ -241,6 +244,7 @@ describe('OneTimeTokenService', () => {
       new OneTimeTokenService(
         prisma as unknown as PrismaService,
         { get: (k: string) => vars[k] } as unknown as ConfigService,
+        { send: vi.fn().mockResolvedValue({}) } as unknown as Mailer,
       );
     expect(
       make({ EXPOSE_DEV_TOKENS: 'true' }).deliver(
@@ -257,6 +261,33 @@ describe('OneTimeTokenService', () => {
       ),
     ).toEqual({});
     expect(make({}).deliver('PASSWORD_RESET', 'a@b.c', 'tok')).toEqual({});
+  });
+
+  it('emails reset and verification links, and never emails mobile numbers', () => {
+    const { prisma } = setup();
+    const send = vi.fn().mockResolvedValue({});
+    const vars: Record<string, string> = {
+      APP_WEB_URL: 'https://edupulse.example/',
+    };
+    const tokens = new OneTimeTokenService(
+      prisma as unknown as PrismaService,
+      { get: (k: string) => vars[k] } as unknown as ConfigService,
+      { send } as unknown as Mailer,
+    );
+    tokens.deliver('PASSWORD_RESET', 'a@b.c', 'abc123');
+    expect(send).toHaveBeenCalledTimes(1);
+    const reset = send.mock.calls[0][0];
+    expect(reset.to).toBe('a@b.c');
+    expect(String(reset.html)).toContain(
+      'https://edupulse.example/set-password?token=abc123',
+    );
+    tokens.deliver('EMAIL_VERIFY', 'a@b.c', 'def456');
+    expect(String(send.mock.calls[1][0].html)).toContain(
+      'https://edupulse.example/verify-email?token=def456',
+    );
+    tokens.deliver('PASSWORD_RESET', '+919876543210', 'tok');
+    tokens.deliver('MOBILE_VERIFY', '+919876543210', 'tok');
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -64,7 +64,10 @@ suspension and role changes take effect immediately (not when the 15-minute acce
 - Access token (15 min) + refresh token (7 days), one `auth_sessions` row per device. Refresh tokens
   rotate on every use; replaying an old one ends that session.
 - Password reset and email/mobile verification use single-use tokens in `auth_tokens` (stored hashed).
-  **No email/SMS provider is connected yet**: tokens are logged, and returned as `devToken` only when
+  Accounts with an email get a link by email (`@nestjs/mail`; set `SMTP_URL`, `MAIL_FROM` and
+  `APP_WEB_URL`): `/set-password?token=` for resets and `/verify-email?token=` for verification. Without
+  `SMTP_URL` the email is only logged (with the link outside production). **No SMS provider is connected
+  yet**: tokens for mobile-only accounts are only logged. Tokens are returned as `devToken` when
   `EXPOSE_DEV_TOKENS=true` outside production. Admins can also issue a token with
   `POST /users/:id/password-token`, and creating a user without a password returns a `setupToken`.
 - Mobiles are stored as `+91XXXXXXXXXX`; `98765 43210`, `09876543210` and `+91 98765-43210` all match.
@@ -96,6 +99,7 @@ src/classes/       class sessions, attendance
 src/fees/          fee plans, invoices, payments, refunds
 src/communications/ announcements, notifications
 src/audit/         audit interceptor and log
+src/mail/          email transport (SMTP, or logged when not configured)
 test/              e2e suites and helpers
 ```
 
