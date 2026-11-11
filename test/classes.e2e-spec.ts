@@ -10,7 +10,9 @@ import {
 } from './helpers.js';
 
 const HOUR = 3600 * 1000;
-const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+// One clock reading for the whole suite, so equal offsets give equal timestamps.
+const NOW = Date.now();
+const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 
 describe('Classes & attendance (e2e)', () => {
   let ctx: TestContext;
