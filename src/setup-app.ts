@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -18,6 +19,17 @@ const DESCRIPTION = [
 /** Shared by main.ts and the e2e tests so both run the exact same pipeline. */
 export function setupApp(app: INestApplication): INestApplication {
   const config = app.get(ConfigService);
+
+  // Behind Railway's (or any) reverse proxy every request comes from the proxy's address, so rate
+  // limits would be shared by all visitors and audit logs would record the proxy. Trust exactly the
+  // configured number of proxy hops (default 1 in production) so req.ip is the visitor's address;
+  // a client cannot spoof it because only the hop the proxy itself appends is trusted.
+  const hops = Number(
+    config.get<string>('TRUST_PROXY') ??
+      (config.get<string>('NODE_ENV') === 'production' ? '1' : '0'),
+  );
+  if (Number.isInteger(hops) && hops > 0)
+    (app as NestExpressApplication).set('trust proxy', hops);
 
   app.setGlobalPrefix(API_PREFIX);
   app.use(helmet());

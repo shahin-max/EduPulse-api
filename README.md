@@ -83,6 +83,29 @@ suspension and role changes take effect immediately (not when the 15-minute acce
   request bodies.
 - Rate limits: 120 requests/min per IP overall; 5–10/min on login, sign-up, password reset and public forms.
 
+## Deploying (Railway API + Netlify website)
+
+**Railway (this API + MySQL)**
+
+- Build: `npm run build`. Start: `npm run start:prod`. Pre-deploy (or once per release):
+  `npx prisma migrate deploy`. Health check path: `/api/v1/health`.
+- Variables: `NODE_ENV=production`, `DATABASE_URL` (Railway MySQL; URL-encode special characters),
+  `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` (two different random strings of 32+ characters),
+  `CORS_ORIGINS` (the Netlify URL and any custom domain, comma separated), `APP_WEB_URL` (the public site,
+  for email links), `SMTP_URL` and `MAIL_FROM` (password reset emails), `EXPOSE_DEV_TOKENS=false`.
+  Railway sets `PORT`.
+- `TRUST_PROXY` defaults to 1 in production, which matches Railway's proxy; without it every visitor would
+  share one rate limit and audit logs would show the proxy's address.
+- **Uploads:** the container disk is wiped on every deploy. Attach a Volume (e.g. mounted at `/data`) and set
+  `UPLOAD_DIR=/data/uploads`; the API logs a warning at startup when it is still a relative folder.
+- Back up the MySQL database and the uploads volume regularly (e.g. a scheduled `mysqldump`).
+
+**Netlify (the Edupulse-LMS website)**
+
+- Variables: `NEXT_PUBLIC_API_URL=https://<railway-api-domain>/api/v1` and `NEXT_PUBLIC_SITE_URL` (the public
+  site address, used for the sitemap and links). `NEXT_PUBLIC_*` values are built in, so redeploy the site
+  after changing them.
+
 ## Fees: invoice and receipt numbers
 
 - Numbers are `<branch prefix>/<financial year>/<sequence>`, e.g. `ALG/26-27/0001` for invoices and

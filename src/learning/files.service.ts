@@ -11,7 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { createReadStream } from 'node:fs';
 import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { extname, resolve, sep } from 'node:path';
+import { extname, isAbsolute, resolve, sep } from 'node:path';
 import { file_assets_visibility } from '../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuthUser, hasRole, isStaff, RoleCode } from '../common/auth.js';
@@ -77,7 +77,16 @@ export class FilesService {
     private readonly access: LearningAccessService,
     config: ConfigService,
   ) {
-    this.root = resolve(config.get<string>('UPLOAD_DIR') ?? './uploads');
+    const dir = config.get<string>('UPLOAD_DIR') ?? './uploads';
+    this.root = resolve(dir);
+    // Container hosts (Railway, Render, Docker) wipe the app's own disk on every deploy. A relative
+    // upload folder there means every uploaded PDF and worksheet disappears with the next release.
+    if (config.get<string>('NODE_ENV') === 'production' && !isAbsolute(dir)) {
+      this.logger.warn(
+        `UPLOAD_DIR is "${dir}" inside the app folder: on Railway this disk is wiped on every deploy. ` +
+          'Attach a Volume (e.g. at /data) and set UPLOAD_DIR=/data/uploads.',
+      );
+    }
   }
 
   async upload(
