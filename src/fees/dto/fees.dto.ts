@@ -14,6 +14,7 @@ import {
 import {
   fee_invoices_status,
   payments_method,
+  payments_status,
 } from '../../generated/prisma/enums.js';
 import { PaginationQueryDto, toBoolean } from '../../common/pagination.js';
 import { trim, upperTrim } from '../../common/validation.js';
@@ -195,6 +196,53 @@ export class ListInvoicesQueryDto extends PaginationQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   overdue?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  branchId?: number;
+
+  /** Matches the invoice number, or the student's name, mobile or admission number. */
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(100)
+  search?: string;
+}
+
+/** The payments register: money received, e.g. one day's collection at a branch. */
+export class ListPaymentsQueryDto extends PaginationQueryDto {
+  /** Paid at or after this moment (ISO date-time; send the start of the day in IST). */
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  from?: Date;
+
+  /** Paid before this moment (exclusive; send the start of the day after the last day). */
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  to?: Date;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  branchId?: number;
+
+  @IsOptional()
+  @IsIn(Object.values(payments_method))
+  method?: payments_method;
+
+  @IsOptional()
+  @IsIn(Object.values(payments_status))
+  status?: payments_status;
+
+  /** Matches the receipt number, payment reference, invoice number or student name. */
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }
 
 export class RecordPaymentDto {

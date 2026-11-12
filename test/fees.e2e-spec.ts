@@ -80,7 +80,7 @@ describe('Fees (e2e)', () => {
         issue: true,
       })
       .expect(201);
-    expect(res.body.invoice_number).toMatch(/^INV-\d{6}-\d{6,}$/);
+    expect(res.body.invoice_number).toMatch(/^TST\/\d{2}-\d{2}\/\d{4,}$/);
     expect(res.body).toMatchObject({
       status: 'ISSUED',
       gross_amount: '3500',
@@ -106,7 +106,7 @@ describe('Fees (e2e)', () => {
       .send(body)
       .expect(201);
     expect(first.body).toMatchObject({ status: 'CONFIRMED', amount: '1000' });
-    expect(first.body.receipt_number).toMatch(/^RCT-\d{6}-\d{6,}$/);
+    expect(first.body.receipt_number).toMatch(/^TST\/\d{2}-\d{2}\/\d{4,}$/);
     ids.payment = first.body.id;
 
     const replay = await http()
@@ -169,7 +169,7 @@ describe('Fees (e2e)', () => {
       .set(as('admin'))
       .send({ status: 'CONFIRMED' })
       .expect(200);
-    expect(confirmed.body.receipt_number).toMatch(/^RCT-/);
+    expect(confirmed.body.receipt_number).toMatch(/^TST\//);
     await http()
       .patch(api(`/payments/${pending.body.id}/status`))
       .set(as('admin'))
@@ -308,5 +308,120 @@ describe('Fees (e2e)', () => {
     expect(res.body.data.map((i: { id: number }) => i.id)).toEqual([
       ids.invoice,
     ]);
+  });
+
+  it('numbers invoices consecutively per branch and year, only when issued', async () => {
+    const sequence = (n: string) => Number(n.split('/')[2]);
+    const draft = async () =>
+      (
+        await http()
+          .post(api('/fee-invoices'))
+          .set(as('admin'))
+          .send({ enrollmentId: ids.enrollment, grossAmount: '500' })
+          .expect(201)
+      ).body;
+    const a = await draft();
+    const b = await draft();
+    expect(a.invoice_number).toBe(`DRAFT-${a.id}`);
+    // Issued out of creation order: the numbers follow the order of issuing, with no gaps.
+    const issuedB = await http()
+      .post(api(`/fee-invoices/${b.id}/issue`))
+      .set(as('admin'))
+      .expect(201);
+    const issuedA = await http()
+      .post(api(`/fee-invoices/${a.id}/issue`))
+      .set(as('admin'))
+      .expect(201);
+    expect(issuedB.body.invoice_number).toMatch(/^TST\/\d{2}-\d{2}\/\d{4,}$/);
+    expect(sequence(issuedA.body.invoice_number)).toBe(
+      sequence(issuedB.body.invoice_number) + 1,
+    );
+    await http()
+      .post(api(`/fee-invoices/${a.id}/issue`))
+      .set(as('admin'))
+      .expect(400);
+    ids.searchInvoice = a.id;
+    ids.searchNumber = issuedA.body.invoice_number;
+  });
+
+  it('searches invoices and totals the whole filter', async () => {
+    const found = await http()
+      .get(
+        api(
+          `/fee-invoices?search=${encodeURIComponent(String(ids.searchNumber))}`,
+        ),
+      )
+      .set(as('admin'))
+      .expect(200);
+    expect(found.body.data.map((i: { id: number }) => i.id)).toEqual([
+      ids.searchInvoice,
+    ]);
+    const all = await http()
+      .get(api(`/fee-invoices?batchId=${ids.batchId}&limit=1`))
+      .set(as('admin'))
+      .expect(200);
+    const { summary } = all.body;
+    // Totals cover every matching invoice, not the one row on this page.
+    expect(all.body.data).toHaveLength(1);
+    expect(summary.invoices).toBeGreaterThan(1);
+    expect(Number(summary.billed) - Number(summary.collected)).toBeCloseTo(
+      Number(summary.outstanding),
+      2,
+    );
+    expect(Number(summary.collected)).toBeGreaterThan(0);
+    await http()
+      .get(api('/fee-invoices?search=nobody-matches-this'))
+      .set(as('admin'))
+      .expect(200)
+      .expect((res) => expect(res.body.summary.invoices).toBe(0));
+  });
+
+  it('lists payments with collection totals by method', async () => {
+    const from = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const to = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const res = await http()
+      .get(api(`/payments?from=${from}&to=${to}&status=CONFIRMED`))
+      .set(as('admin'))
+      .expect(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0]).toMatchObject({
+      fee_invoices: { invoice_number: expect.any(String) },
+    });
+    const { summary } = res.body;
+    const byMethod = summary.byMethod.reduce(
+      (n: number, m: { amount: string }) => n + Number(m.amount),
+      0,
+    );
+    expect(byMethod).toBeCloseTo(Number(summary.collected), 2);
+    expect(Number(summary.net)).toBeCloseTo(
+      Number(summary.collected) - Number(summary.refunded),
+      2,
+    );
+    expect(summary.byMethod.map((m: { method: string }) => m.method)).toContain(
+      'UPI',
+    );
+    // Nothing was paid in a period long ago.
+    const empty = await http()
+      .get(api('/payments?from=2001-01-01T00:00:00Z&to=2001-01-02T00:00:00Z'))
+      .set(as('admin'))
+      .expect(200);
+    expect(empty.body.summary).toMatchObject({
+      payments: 0,
+      collected: '0.00',
+    });
+    await http().get(api('/payments')).set(as('student')).expect(403);
+  });
+
+  it('refuses a branch prefix another branch already uses', async () => {
+    await http()
+      .post(api('/branches'))
+      .set(as('admin'))
+      .send({
+        code: 'DUPE',
+        name: 'Dupe',
+        invoicePrefix: 'TST',
+        receiptPrefix: 'DUPR',
+      })
+      .expect(409);
   });
 });

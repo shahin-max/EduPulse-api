@@ -9,13 +9,20 @@ import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuthUser, isAdmin } from '../common/auth.js';
 import { paginated, skipTake } from '../common/pagination.js';
-import { documentNumber, invoiceState, money, sum } from './invoice-math.js';
+import {
+  draftInvoiceNumber,
+  invoiceState,
+  money,
+  sum,
+} from './invoice-math.js';
+import { nextDocumentNumber } from './document-numbers.js';
 import {
   CreateFeePlanDto,
   CreateInvoiceDto,
   CreateRefundDto,
   ListFeePlansQueryDto,
   ListInvoicesQueryDto,
+  ListPaymentsQueryDto,
   RecordPaymentDto,
   UpdateFeePlanDto,
   UpdateInvoiceDto,
@@ -27,6 +34,37 @@ type Tx = Prisma.TransactionClient;
 
 const paymentInclude = {
   payment_refunds: { orderBy: { id: 'asc' } },
+} satisfies Prisma.paymentsInclude;
+
+/** A payments register row: who paid, for which invoice and batch, and who took the money. */
+const paymentListInclude = {
+  payment_refunds: { orderBy: { id: 'asc' } },
+  users: { select: { id: true, full_name: true } },
+  fee_invoices: {
+    select: {
+      id: true,
+      invoice_number: true,
+      enrollments: {
+        select: {
+          student_user_id: true,
+          student_profiles: {
+            select: {
+              admission_number: true,
+              users: { select: { full_name: true, mobile: true } },
+            },
+          },
+          batches: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              branches: { select: { id: true, code: true, name: true } },
+            },
+          },
+        },
+      },
+    },
+  },
 } satisfies Prisma.paymentsInclude;
 
 const invoiceInclude = {
@@ -183,7 +221,8 @@ export class FeesService {
 
     const now = new Date();
     const id = await this.prisma.$transaction(async (tx) => {
-      // The invoice number is derived from the row id, so insert with a placeholder first.
+      // Insert with a placeholder: a draft's number is derived from its id, an issued one takes the
+      // next number of the branch's series.
       const created = await tx.fee_invoices.create({
         data: {
           invoice_number: `TMP-${randomUUID()}`,
@@ -201,7 +240,11 @@ export class FeesService {
       });
       await tx.fee_invoices.update({
         where: { id: created.id },
-        data: { invoice_number: documentNumber('INV', created.id, now) },
+        data: {
+          invoice_number: dto.issue
+            ? await nextDocumentNumber(tx, enrollment.branch_id, 'INVOICE', now)
+            : draftInvoiceNumber(created.id),
+        },
       });
       return created.id;
     });
@@ -229,6 +272,32 @@ export class FeesService {
             status: { in: ['ISSUED', 'PART_PAID'] },
           }
         : {}),
+      branch_id:
+        query.branchId === undefined ? undefined : BigInt(query.branchId),
+      ...(query.search
+        ? {
+            OR: [
+              { invoice_number: { contains: query.search } },
+              {
+                enrollments: {
+                  student_profiles: {
+                    OR: [
+                      { admission_number: { contains: query.search } },
+                      { users: { full_name: { contains: query.search } } },
+                      {
+                        users: {
+                          mobile: {
+                            contains: query.search.replace(/\s+/g, ''),
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
     };
     const [data, total] = await this.prisma.$transaction([
       this.prisma.fee_invoices.findMany({
@@ -239,7 +308,124 @@ export class FeesService {
       }),
       this.prisma.fee_invoices.count({ where }),
     ]);
-    return paginated(data.map(presentInvoice), total, query);
+    return {
+      ...paginated(data.map(presentInvoice), total, query),
+      summary: await this.invoiceSummary(where),
+    };
+  }
+
+  /**
+   * Totals over every invoice matching the filter (not just one page). Drafts and void invoices are
+   * not money owed, so they are left out: billed = payable amounts, collected = confirmed payments
+   * minus confirmed refunds, outstanding = billed - collected.
+   */
+  private async invoiceSummary(where: Prisma.fee_invoicesWhereInput) {
+    const owed: Prisma.fee_invoicesWhereInput = {
+      AND: [where, { status: { notIn: ['DRAFT', 'VOID'] } }],
+    };
+    const [billed, paid, refunded] = await Promise.all([
+      this.prisma.fee_invoices.aggregate({
+        where: owed,
+        _sum: { amount_due: true },
+        _count: { _all: true },
+      }),
+      this.prisma.payments.aggregate({
+        where: { status: 'CONFIRMED', fee_invoices: owed },
+        _sum: { amount: true },
+      }),
+      this.prisma.payment_refunds.aggregate({
+        where: { status: 'CONFIRMED', payments: { fee_invoices: owed } },
+        _sum: { amount: true },
+      }),
+    ]);
+    const billedAmount = orZero(billed._sum.amount_due);
+    const collected = orZero(paid._sum.amount).minus(
+      orZero(refunded._sum.amount),
+    );
+    return {
+      invoices: billed._count._all,
+      billed: billedAmount.toFixed(2),
+      collected: collected.toFixed(2),
+      outstanding: billedAmount.minus(collected).toFixed(2),
+    };
+  }
+
+  async listPayments(query: ListPaymentsQueryDto) {
+    const period =
+      query.from || query.to ? { gte: query.from, lt: query.to } : undefined;
+    const branch =
+      query.branchId === undefined ? undefined : BigInt(query.branchId);
+    const where: Prisma.paymentsWhereInput = {
+      branch_id: branch,
+      method: query.method,
+      status: query.status,
+      paid_at: period,
+      ...(query.search
+        ? {
+            OR: [
+              { receipt_number: { contains: query.search } },
+              { external_reference: { contains: query.search } },
+              { fee_invoices: { invoice_number: { contains: query.search } } },
+              {
+                fee_invoices: {
+                  enrollments: {
+                    student_profiles: {
+                      users: { full_name: { contains: query.search } },
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+    const confirmed: Prisma.paymentsWhereInput = {
+      AND: [where, { status: 'CONFIRMED' }],
+    };
+    const [rows, total, byMethod, refunds] = await Promise.all([
+      this.prisma.payments.findMany({
+        where,
+        include: paymentListInclude,
+        orderBy: [{ paid_at: 'desc' }, { id: 'desc' }],
+        ...skipTake(query),
+      }),
+      this.prisma.payments.count({ where }),
+      this.prisma.payments.groupBy({
+        by: ['method'],
+        where: confirmed,
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      // Refunds handed back in the same period, at the same branch and by the same method.
+      this.prisma.payment_refunds.aggregate({
+        where: {
+          status: 'CONFIRMED',
+          refunded_at: period,
+          payments: { branch_id: branch, method: query.method },
+        },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+    ]);
+    const collected = sum(byMethod.map((m) => orZero(m._sum.amount)));
+    const refunded = orZero(refunds._sum.amount);
+    return {
+      ...paginated(rows, total, query),
+      summary: {
+        payments: byMethod.reduce((n, m) => n + m._count._all, 0),
+        collected: collected.toFixed(2),
+        byMethod: byMethod
+          .map((m) => ({
+            method: m.method,
+            payments: m._count._all,
+            amount: orZero(m._sum.amount).toFixed(2),
+          }))
+          .sort((a, b) => Number(b.amount) - Number(a.amount)),
+        refunds: refunds._count._all,
+        refunded: refunded.toFixed(2),
+        net: collected.minus(refunded).toFixed(2),
+      },
+    };
   }
 
   /** Admins see any invoice; students see their own issued (non-draft) invoices. */
@@ -294,13 +480,31 @@ export class FeesService {
     return this.loadInvoice(id);
   }
 
+  /** Issuing gives the invoice its number in the branch's series for the current financial year. */
   async issueInvoice(id: bigint) {
-    const invoice = await this.getInvoiceRow(id);
-    if (invoice.status !== 'DRAFT')
-      throw new BadRequestException('Only DRAFT invoices can be issued');
-    await this.prisma.fee_invoices.update({
-      where: { id },
-      data: { status: 'ISSUED', issued_at: new Date() },
+    await this.getInvoiceRow(id);
+    await this.prisma.$transaction(async (tx) => {
+      await lockInvoice(tx, id);
+      const invoice = await tx.fee_invoices.findUniqueOrThrow({
+        where: { id },
+        select: { status: true, branch_id: true },
+      });
+      if (invoice.status !== 'DRAFT')
+        throw new BadRequestException('Only DRAFT invoices can be issued');
+      const now = new Date();
+      await tx.fee_invoices.update({
+        where: { id },
+        data: {
+          status: 'ISSUED',
+          issued_at: now,
+          invoice_number: await nextDocumentNumber(
+            tx,
+            invoice.branch_id,
+            'INVOICE',
+            now,
+          ),
+        },
+      });
     });
     return this.loadInvoice(id);
   }
@@ -393,7 +597,14 @@ export class FeesService {
         if (status === 'CONFIRMED') {
           await tx.payments.update({
             where: { id: payment.id },
-            data: { receipt_number: documentNumber('RCT', payment.id, now) },
+            data: {
+              receipt_number: await nextDocumentNumber(
+                tx,
+                invoice.branch_id,
+                'RECEIPT',
+                now,
+              ),
+            },
           });
           await recompute(tx, invoiceId);
         }
@@ -457,7 +668,12 @@ export class FeesService {
           ...(dto.status === 'CONFIRMED'
             ? {
                 paid_at: dto.paidAt ?? payment.paid_at ?? now,
-                receipt_number: documentNumber('RCT', id, now),
+                receipt_number: await nextDocumentNumber(
+                  tx,
+                  payment.branch_id,
+                  'RECEIPT',
+                  now,
+                ),
               }
             : {}),
         },
@@ -717,4 +933,9 @@ function startOfToday(): Date {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   );
+}
+
+/** An aggregate _sum (null when nothing matched) as a Decimal. */
+function orZero(value: Prisma.Decimal | null): Prisma.Decimal {
+  return value ?? new Prisma.Decimal(0);
 }

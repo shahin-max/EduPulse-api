@@ -28,10 +28,7 @@ export function mailTransport(config: ConfigService): MailTransport {
 /** Base URL of the website, for links in emails. Falls back to the first CORS origin. */
 export function webUrl(config: ConfigService): string {
   const explicit = config.get<string>('APP_WEB_URL')?.trim();
-  const fallback = config
-    .get<string>('CORS_ORIGINS')
-    ?.split(',')[0]
-    ?.trim();
+  const fallback = config.get<string>('CORS_ORIGINS')?.split(',')[0]?.trim();
   return (explicit || fallback || 'http://localhost:3000').replace(/\/+$/, '');
 }
 

@@ -18,6 +18,7 @@ import {
   CreateRefundDto,
   ListFeePlansQueryDto,
   ListInvoicesQueryDto,
+  ListPaymentsQueryDto,
   RecordPaymentDto,
   UpdateFeePlanDto,
   UpdateInvoiceDto,
@@ -133,6 +134,16 @@ export class FeeInvoicesController {
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly fees: FeesService) {}
+
+  /**
+   * The payments register with totals for the whole filter (confirmed amounts by method, refunds
+   * made in the same period, net collection). Use from/to for a day's or month's collection.
+   */
+  @Roles(RoleCode.ADMIN)
+  @Get()
+  findAll(@Query() query: ListPaymentsQueryDto) {
+    return this.fees.listPayments(query);
+  }
 
   @Roles(RoleCode.ADMIN, RoleCode.STUDENT)
   @Get(':id')

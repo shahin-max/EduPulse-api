@@ -1,6 +1,8 @@
 import { Prisma } from '../generated/prisma/client.js';
 import {
-  documentNumber,
+  draftInvoiceNumber,
+  fiscalYear,
+  sequenceNumber,
   invoiceState,
   money,
   MONEY_REGEX,
@@ -94,13 +96,21 @@ describe('money', () => {
   });
 });
 
-describe('documentNumber', () => {
-  it('formats prefix, year-month and padded id', () => {
-    expect(documentNumber('INV', 123n, new Date('2027-04-09T10:00:00Z'))).toBe(
-      'INV-202704-000123',
-    );
-    expect(
-      documentNumber('RCT', 1234567n, new Date('2027-12-01T00:00:00Z')),
-    ).toBe('RCT-202712-1234567');
+describe('fiscalYear', () => {
+  it('runs April to March in IST', () => {
+    expect(fiscalYear(new Date('2027-04-01T00:00:00+05:30'))).toBe('2027-28');
+    // 31 March 23:00 IST is still the previous year, even though it is 17:30 UTC.
+    expect(fiscalYear(new Date('2027-03-31T23:00:00+05:30'))).toBe('2026-27');
+    // 31 March 19:00 UTC is already 1 April in IST.
+    expect(fiscalYear(new Date('2027-03-31T19:00:00Z'))).toBe('2027-28');
+    expect(fiscalYear(new Date('2099-12-31T00:00:00Z'))).toBe('2099-00');
+  });
+});
+
+describe('sequenceNumber', () => {
+  it('formats prefix, short financial year and padded sequence', () => {
+    expect(sequenceNumber('ALG', '2026-27', 1)).toBe('ALG/26-27/0001');
+    expect(sequenceNumber('ALGR', '2026-27', 12345)).toBe('ALGR/26-27/12345');
+    expect(draftInvoiceNumber(42n)).toBe('DRAFT-42');
   });
 });

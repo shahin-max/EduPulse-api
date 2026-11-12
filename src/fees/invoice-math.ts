@@ -71,12 +71,26 @@ export function money(value: string | number): Decimal {
   return new Prisma.Decimal(value).toDecimalPlaces(2);
 }
 
-/** "INV-202704-000123": prefix, year+month of creation, zero-padded row id (unique by construction). */
-export function documentNumber(
-  prefix: 'INV' | 'RCT',
-  id: bigint,
-  at: Date,
-): string {
-  const yyyymm = `${at.getUTCFullYear()}${String(at.getUTCMonth() + 1).padStart(2, '0')}`;
-  return `${prefix}-${yyyymm}-${String(id).padStart(6, '0')}`;
+/** Indian financial year (April to March, in IST) of a moment, as document_sequences stores it: "2026-27". */
+export function fiscalYear(at: Date): string {
+  const ist = new Date(at.getTime() + 330 * 60_000);
+  const start =
+    ist.getUTCMonth() >= 3 ? ist.getUTCFullYear() : ist.getUTCFullYear() - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
+
+/**
+ * "ALG/26-27/0001": the branch prefix, the financial year and a per-branch, per-year sequence
+ * (consecutive, as GST invoices require; at least 4 digits). With a prefix of up to 5 characters the
+ * number fits GST's 16-character limit until the sequence passes 9999.
+ */
+export function sequenceNumber(
+  prefix: string,
+  fy: string,
+  value: number,
+): string {
+  return `${prefix}/${fy.slice(2)}/${String(value).padStart(4, '0')}`;
+}
+
+/** Drafts get a placeholder; the real number is taken when the invoice is issued, so discarded drafts leave no gaps. */
+export const draftInvoiceNumber = (id: bigint) => `DRAFT-${id}`;

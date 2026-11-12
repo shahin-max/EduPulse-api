@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateBranchDto, UpdateBranchDto } from './dto/branch.dto.js';
 
@@ -28,7 +32,8 @@ export class BranchesService {
   }
 
   /** A duplicate code becomes a 409 through PrismaExceptionFilter (P2002). */
-  create(dto: CreateBranchDto) {
+  async create(dto: CreateBranchDto) {
+    await this.assertPrefixesFree(dto);
     return this.prisma.branches.create({
       data: {
         ...toRow(dto),
@@ -43,11 +48,37 @@ export class BranchesService {
 
   async update(id: bigint, dto: UpdateBranchDto) {
     await this.findOne(id);
+    await this.assertPrefixesFree(dto, id);
     return this.prisma.branches.update({
       where: { id },
       data: toRow(dto),
       include: withCounts,
     });
+  }
+
+  /**
+   * Invoice and receipt numbers are "<prefix>/<year>/<n>" with a sequence per branch, so two branches
+   * sharing a prefix would produce the same numbers.
+   */
+  private async assertPrefixesFree(dto: UpdateBranchDto, exceptId?: bigint) {
+    const checks = [
+      { field: 'invoice_prefix', value: dto.invoicePrefix, label: 'invoice' },
+      { field: 'receipt_prefix', value: dto.receiptPrefix, label: 'receipt' },
+    ] as const;
+    for (const { field, value, label } of checks) {
+      if (value === undefined) continue;
+      const other = await this.prisma.branches.findFirst({
+        where: {
+          [field]: value,
+          ...(exceptId ? { id: { not: exceptId } } : {}),
+        },
+        select: { name: true },
+      });
+      if (other)
+        throw new ConflictException(
+          `The ${label} prefix ${value} is already used by ${other.name}; each branch needs its own`,
+        );
+    }
   }
 }
 

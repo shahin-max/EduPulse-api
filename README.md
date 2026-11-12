@@ -83,6 +83,19 @@ suspension and role changes take effect immediately (not when the 15-minute acce
   request bodies.
 - Rate limits: 120 requests/min per IP overall; 5–10/min on login, sign-up, password reset and public forms.
 
+## Fees: invoice and receipt numbers
+
+- Numbers are `<branch prefix>/<financial year>/<sequence>`, e.g. `ALG/26-27/0001` for invoices and
+  `ALGR/26-27/0001` for receipts. Each branch has its own consecutive series per Indian financial year
+  (April to March, IST), kept in `document_sequences`; the series restarts every April.
+- Draft invoices are numbered `DRAFT-<id>`; the real number is taken when the invoice is **issued**, so
+  discarded drafts leave no gaps. Receipt numbers are taken when a payment is **confirmed**.
+- Each branch needs its own invoice and receipt prefixes (the API refuses duplicates). Keep prefixes to 5
+  characters or fewer so numbers fit GST's 16-character limit.
+- `GET /fee-invoices` returns `summary` (billed, collected, outstanding) over every matching invoice;
+  `GET /payments` is the payments register (filter by `from`/`to`, branch, method) with totals by method,
+  refunds in the period and the net collection.
+
 ## Project layout
 
 ```

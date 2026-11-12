@@ -115,18 +115,29 @@ export class OneTimeTokenService {
       return {
         subject: 'Verify your email for EduPulse Academy',
         html: html`<p>Hello,</p>
-          <p>Please confirm this email address for your EduPulse Academy account.</p>
+          <p>
+            Please confirm this email address for your EduPulse Academy account.
+          </p>
           <p><a href="${link}">Verify my email</a></p>
-          <p>The link works for 24 hours. If you did not ask for this, you can ignore this email.</p>`,
+          <p>
+            The link works for 24 hours. If you did not ask for this, you can
+            ignore this email.
+          </p>`,
       };
     }
     const link = `${base}/set-password?${query}`;
     return {
       subject: 'Reset your EduPulse Academy password',
       html: html`<p>Hello,</p>
-        <p>We received a request to reset the password of your EduPulse Academy account.</p>
+        <p>
+          We received a request to reset the password of your EduPulse Academy
+          account.
+        </p>
         <p><a href="${link}">Choose a new password</a></p>
-        <p>The link works for 1 hour and can be used once. If you did not ask for this, you can ignore this email; your password stays the same.</p>`,
+        <p>
+          The link works for 1 hour and can be used once. If you did not ask for
+          this, you can ignore this email; your password stays the same.
+        </p>`,
     };
   }
 }
