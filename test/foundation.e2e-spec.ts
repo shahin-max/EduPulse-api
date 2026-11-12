@@ -434,6 +434,22 @@ describe('Foundation (e2e)', () => {
       });
       id.batch = batch.body.id;
 
+      // Text search matches the name or code, case-insensitively.
+      for (const term of ['morning', 'jee-27']) {
+        const found = await http()
+          .get(api(`/batches?search=${term}`))
+          .set(bearer(t.admin))
+          .expect(200);
+        expect(found.body.data.map((b: { id: number }) => b.id)).toContain(
+          id.batch,
+        );
+      }
+      const none = await http()
+        .get(api('/batches?search=no-such-batch'))
+        .set(bearer(t.admin))
+        .expect(200);
+      expect(none.body.meta.total).toBe(0);
+
       const assigned = await http()
         .post(api(`/batches/${id.batch}/faculty`))
         .set(bearer(t.admin))

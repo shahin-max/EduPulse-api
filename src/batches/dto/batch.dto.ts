@@ -10,6 +10,7 @@ import {
   Length,
   Matches,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import {
@@ -83,6 +84,13 @@ export class ListBatchesQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(Object.values(batches_status))
   status?: batches_status;
+
+  /** Matches the batch name or code, or the course title or code. */
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 
   /** Faculty: only batches you teach. Students: only batches you are enrolled in. */
   @IsOptional()

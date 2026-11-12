@@ -84,6 +84,16 @@ export class BatchesService {
       course_id:
         query.courseId === undefined ? undefined : BigInt(query.courseId),
       ...(query.status ? { status: query.status } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { name: { contains: query.search } },
+              { code: { contains: query.search } },
+              { courses: { title: { contains: query.search } } },
+              { courses: { code: { contains: query.search } } },
+            ],
+          }
+        : {}),
     };
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.batches.findMany({
