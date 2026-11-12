@@ -212,6 +212,27 @@ describe('Exams (e2e)', () => {
       ).toEqual([...questionIds].reverse());
       expect(Number(reordered.body.exam_questions[0].negative_marks)).toBe(1);
 
+      // Changing the exam's penalty after adding questions reaches the questions on the old default.
+      const penalties = async () =>
+        (
+          await ctx.prisma.exam_questions.findMany({
+            where: { exam_id: BigInt(examId) },
+            select: { negative_marks: true },
+          })
+        ).map((q) => Number(q.negative_marks));
+      await http()
+        .patch(api(`/exams/${examId}`))
+        .set(bearer(faculty.token))
+        .send({ negativeMarksPerWrong: 0.5 })
+        .expect(200);
+      expect(await penalties()).toEqual(questionIds.map(() => 0.5));
+      await http()
+        .patch(api(`/exams/${examId}`))
+        .set(bearer(faculty.token))
+        .send({ negativeMarksPerWrong: 1 })
+        .expect(200);
+      expect(await penalties()).toEqual(questionIds.map(() => 1));
+
       // The other faculty member does not teach the batch, so cannot manage the exam now.
       await http()
         .patch(api(`/exams/${examId}`))
@@ -342,6 +363,11 @@ describe('Exams (e2e)', () => {
         .patch(api(`/exams/${examId}`))
         .set(bearer(faculty.token))
         .send({ status: 'DRAFT' })
+        .expect(409);
+      await http()
+        .patch(api(`/exams/${examId}`))
+        .set(bearer(faculty.token))
+        .send({ negativeMarksPerWrong: 2 })
         .expect(409);
       await http()
         .delete(api(`/exams/${examId}`))

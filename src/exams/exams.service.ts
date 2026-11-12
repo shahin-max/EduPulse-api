@@ -211,6 +211,43 @@ export class ExamsService {
     );
     if (dto.status && dto.status !== exam.status)
       await this.assertStatusChange(exam, dto.status);
+    // Each exam question copies the exam's penalty when it is added. Changing the exam's penalty
+    // afterwards must reach the questions still on the old default, or the exam would say
+    // "-1 per wrong" while scoring 0. Questions given their own penalty keep it.
+    const newPenalty =
+      dto.negativeMarksPerWrong === undefined
+        ? undefined
+        : toDecimal(dto.negativeMarksPerWrong);
+    const penaltyChanged =
+      newPenalty !== undefined &&
+      !new Prisma.Decimal(exam.negative_marks_per_wrong).equals(newPenalty);
+    if (penaltyChanged)
+      await this.assertNoAttempts(
+        id,
+        'Students have already attempted this exam, so its negative marking can no longer change',
+      );
+    const [updated] = await this.prisma.$transaction([
+      this.updateExamRow(id, dto, newPenalty),
+      ...(penaltyChanged
+        ? [
+            this.prisma.exam_questions.updateMany({
+              where: {
+                exam_id: id,
+                negative_marks: exam.negative_marks_per_wrong,
+              },
+              data: { negative_marks: newPenalty },
+            }),
+          ]
+        : []),
+    ]);
+    return updated;
+  }
+
+  private updateExamRow(
+    id: bigint,
+    dto: UpdateExamDto,
+    newPenalty: Prisma.Decimal | undefined,
+  ) {
     return this.prisma.exams.update({
       where: { id },
       data: {
@@ -223,10 +260,7 @@ export class ExamsService {
         title: dto.title,
         kind: dto.kind,
         duration_minutes: dto.durationMinutes,
-        negative_marks_per_wrong:
-          dto.negativeMarksPerWrong === undefined
-            ? undefined
-            : toDecimal(dto.negativeMarksPerWrong),
+        negative_marks_per_wrong: newPenalty,
         max_attempts: dto.maxAttempts,
         opens_at: dto.opensAt,
         closes_at: dto.closesAt,

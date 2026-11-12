@@ -20,5 +20,9 @@ export function mariaDbConfigFromUrl(databaseUrl: string): PoolConfig {
     connectionLimit: Number(url.searchParams.get('connection_limit') ?? 10),
     // Needed for MySQL 8's default caching_sha2_password auth on non-TLS connections.
     allowPublicKeyRetrieval: true,
+    // Prisma writes timestamps in UTC, but columns filled by MySQL itself (DEFAULT / ON UPDATE
+    // CURRENT_TIMESTAMP, e.g. every updated_at) use the session time zone. On a server set to IST
+    // that stored updated_at 5h30m ahead of created_at. Run every session in UTC to match.
+    initSql: "SET time_zone = '+00:00'",
   };
 }

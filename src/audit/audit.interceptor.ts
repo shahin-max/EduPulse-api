@@ -58,7 +58,13 @@ export class AuditInterceptor implements NestInterceptor {
                 100,
               ),
               entity_type: controller.slice(0, 80),
-              entity_id: (params.id ?? resultId)?.slice(0, 80),
+              // Routes keyed by something other than :id (students/:userId, site-content/:key) too.
+              entity_id: (
+                params.id ??
+                params.userId ??
+                params.key ??
+                resultId
+              )?.slice(0, 80),
               metadata: {
                 method: request.method,
                 path: request.originalUrl.split('?')[0],

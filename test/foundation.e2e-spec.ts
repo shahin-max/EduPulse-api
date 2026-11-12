@@ -690,5 +690,47 @@ describe('Foundation (e2e)', () => {
       expect(JSON.stringify(res.body)).not.toContain('Passw0rd');
       await http().get(api('/audit-logs')).set(bearer(t.faculty)).expect(403);
     });
+
+    it('records the record id for routes keyed by :userId or :key', async () => {
+      const student = await createUser(ctx, ['STUDENT']);
+      await http()
+        .patch(api(`/students/${student.id}`))
+        .set(bearer(t.admin))
+        .send({ grade: 'Class 6' })
+        .expect(200);
+      await vi.waitFor(
+        async () => {
+          const res = await http()
+            .get(api(`/audit-logs?entityType=Students&entityId=${student.id}`))
+            .set(bearer(t.admin))
+            .expect(200);
+          expect(res.body.data.length).toBeGreaterThan(0);
+        },
+        { timeout: 3000, interval: 100 },
+      );
+    });
+  });
+
+  describe('timestamps', () => {
+    it('stores database-filled updated_at in UTC, like created_at', async () => {
+      const student = await createUser(ctx, ['STUDENT']);
+      await http()
+        .patch(api(`/students/${student.id}`))
+        .set(bearer(t.admin))
+        .send({ schoolName: 'Clock Check School' })
+        .expect(200);
+      const row = await ctx.prisma.users.findUniqueOrThrow({
+        where: { id: BigInt(student.id) },
+        select: {
+          student_profiles: { select: { created_at: true, updated_at: true } },
+        },
+      });
+      const profile = row.student_profiles!;
+      // Both were written moments apart; a session time zone other than UTC skews one by hours.
+      const gapMinutes =
+        Math.abs(profile.updated_at.getTime() - profile.created_at.getTime()) /
+        60_000;
+      expect(gapMinutes).toBeLessThan(5);
+    });
   });
 });
