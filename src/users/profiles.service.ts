@@ -15,7 +15,9 @@ const publicFacultySelect = {
   qualification: true,
   specialization: true,
   biography: true,
-  users: { select: { full_name: true } },
+  users: { select: { full_name: true, photo_url: true } },
+  // Subjects they teach, one row per batch assignment (the website de-duplicates them).
+  batch_faculty: { select: { subjects: { select: { name: true } } } },
 } as const;
 
 @Injectable()
@@ -106,6 +108,7 @@ export class ProfilesService {
             email: true,
             mobile: true,
             status: true,
+            photo_url: true,
           },
         },
         batch_faculty: {

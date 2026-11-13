@@ -96,8 +96,10 @@ suspension and role changes take effect immediately (not when the 15-minute acce
   Railway sets `PORT`.
 - `TRUST_PROXY` defaults to 1 in production, which matches Railway's proxy; without it every visitor would
   share one rate limit and audit logs would show the proxy's address.
-- **Uploads:** the container disk is wiped on every deploy. Attach a Volume (e.g. mounted at `/data`) and set
-  `UPLOAD_DIR=/data/uploads`; the API logs a warning at startup when it is still a relative folder.
+- **Uploads:** set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` (and optionally
+  `CLOUDINARY_FOLDER`, default `edupulse`) so files are stored on Cloudinary. Without them files go to the
+  container disk, which is wiped on every deploy: then attach a Volume (e.g. at `/data`) and set
+  `UPLOAD_DIR=/data/uploads`. Files uploaded to disk before Cloudinary was set up still need that disk.
 - Back up the MySQL database and the uploads volume regularly (e.g. a scheduled `mysqldump`).
 
 **Netlify (the Edupulse-LMS website)**
@@ -119,6 +121,31 @@ suspension and role changes take effect immediately (not when the 15-minute acce
   `GET /payments` is the payments register (filter by `from`/`to`, branch, method) with totals by method,
   refunds in the period and the net collection.
 
+## Files and profile photos
+
+- `POST /files` stores new files on Cloudinary when it is configured (`file_assets.bucket = 'cloudinary'`), else on
+  disk (`'local'`). Cloudinary files are uploaded as **authenticated**: a plain Cloudinary link is refused, and
+  `GET /files/:id/content` checks access and then streams the file through a one-minute signed link. Images are
+  stored as Cloudinary images, everything else (PDF, Word, video) as raw files.
+- Profile photos: `PUT /me/photo` (any signed-in user, multipart field `photo`, JPEG/PNG/WebP/GIF up to 5 MB,
+  checked by content) and `DELETE /me/photo`; admins use `PUT/DELETE /users/:id/photo`. Photos are public,
+  cropped square around the face at 512 px, and returned as `photo_url` on users and on `GET /faculty`.
+  They need Cloudinary (503 without it).
+- The e2e suites blank the Cloudinary keys, so tests never upload to a real account.
+
+## Teaching reports
+
+For admins and the faculty assigned to the batch:
+
+- `GET /teaching/dashboard`: submissions waiting for review, classes from the last 14 days without attendance,
+  assignments due in the next 7 days (with how many were handed in), open or upcoming tests, and the caller's
+  new and follow-up enquiries. Faculty see their batches; admins see all.
+- `GET /batches/:id/gradebook`: every student (active, paused or completed enrollment) with attendance (late
+  counts as present, excused is left out), each published assignment (missing, not due, submitted, late,
+  reviewed + marks), each test (best graded attempt) and study materials completed.
+- `GET /batches/:id/students/:userId/report`: one student's attendance by class, assignments with feedback,
+  every test attempt and study material progress.
+
 ## Project layout
 
 ```
@@ -136,8 +163,10 @@ src/fees/          fee plans, invoices, payments, refunds
 src/communications/ announcements, notifications
 src/audit/         audit interceptor and log
 src/mail/          email transport (SMTP, or logged when not configured)
+src/storage/       Cloudinary storage (files and profile photos)
+src/reports/       teaching dashboard, batch gradebook, student progress report
 test/              e2e suites and helpers
 ```
 
-Uploaded files are stored on local disk under `UPLOAD_DIR` (default `./uploads`); back that folder up
-with the database.
+Uploaded files are stored on Cloudinary when it is configured, otherwise on local disk under `UPLOAD_DIR`
+(default `./uploads`); back that folder up with the database.

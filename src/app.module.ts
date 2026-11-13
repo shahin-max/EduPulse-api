@@ -6,6 +6,7 @@ import { validateEnv } from './config/env.validation.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { AppMailModule } from './mail/mail.module.js';
 import { AccessModule } from './common/access.service.js';
+import { StorageModule } from './storage/cloudinary.service.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { RolesGuard } from './common/guards/roles.guard.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
@@ -21,6 +22,7 @@ import { ExamsModule } from './exams/exams.module.js';
 import { ClassesModule } from './classes/classes.module.js';
 import { FeesModule } from './fees/fees.module.js';
 import { CommunicationsModule } from './communications/communications.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { HealthController } from './health/health.controller.js';
 
 @Module({
@@ -38,6 +40,7 @@ import { HealthController } from './health/health.controller.js';
     PrismaModule,
     AppMailModule,
     AccessModule,
+    StorageModule,
     AuthModule,
     UsersModule,
     CatalogModule,
@@ -49,6 +52,7 @@ import { HealthController } from './health/health.controller.js';
     ClassesModule,
     FeesModule,
     CommunicationsModule,
+    ReportsModule,
     AuditModule,
   ],
   controllers: [HealthController],

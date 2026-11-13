@@ -21,6 +21,20 @@ export function validateEnv(
       'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
     );
   }
+  // Cloudinary is optional, but half a configuration would silently fall back to the local disk.
+  const cloudinary = [
+    'CLOUDINARY_CLOUD_NAME',
+    'CLOUDINARY_API_KEY',
+    'CLOUDINARY_API_SECRET',
+  ];
+  const set = cloudinary.filter(
+    (key) => typeof config[key] === 'string' && config[key].trim() !== '',
+  );
+  if (set.length && set.length < cloudinary.length) {
+    throw new Error(
+      `Set all of ${cloudinary.join(', ')} to use Cloudinary, or none of them`,
+    );
+  }
   if (config.NODE_ENV === 'production') {
     for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']) {
       const value = String(config[key]);

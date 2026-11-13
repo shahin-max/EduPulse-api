@@ -28,5 +28,9 @@ export function loadTestEnv(): Record<string, string> {
     );
   }
   if (process.env.E2E_UPLOAD_DIR) env.UPLOAD_DIR = process.env.E2E_UPLOAD_DIR;
+  // ConfigModule also reads .env, which may hold real Cloudinary keys: blank them so the suites
+  // never upload to a real account (empty values win over .env). Files go to UPLOAD_DIR instead.
+  for (const key of ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'])
+    env[key] = '';
   return env;
 }

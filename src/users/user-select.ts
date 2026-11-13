@@ -13,6 +13,7 @@ export const safeUserSelect = {
   email_verified_at: true,
   mobile_verified_at: true,
   last_login_at: true,
+  photo_url: true,
   created_at: true,
   updated_at: true,
   deleted_at: true,
