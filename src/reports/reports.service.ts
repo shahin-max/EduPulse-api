@@ -18,9 +18,12 @@ export type AttendanceSummary = {
   percentage: number | null;
 };
 
-export type SubmissionState = 'MISSING' | 'NOT_DUE' | 'SUBMITTED' | 'LATE' | 'REVIEWED';
+export type SubmissionState =
+  'MISSING' | 'NOT_DUE' | 'SUBMITTED' | 'LATE' | 'REVIEWED';
 
-export function attendanceSummary(counts: Partial<Record<string, number>>): AttendanceSummary {
+export function attendanceSummary(
+  counts: Partial<Record<string, number>>,
+): AttendanceSummary {
   const present = counts.PRESENT ?? 0;
   const late = counts.LATE ?? 0;
   const absent = counts.ABSENT ?? 0;
@@ -77,7 +80,10 @@ export class ReportsService {
     const [enrollments, assignments, exams, sessionsHeld, materialsTotal] =
       await Promise.all([
         this.prisma.enrollments.findMany({
-          where: { batch_id: batchId, status: { in: [...REPORT_ENROLLMENT_STATUSES] } },
+          where: {
+            batch_id: batchId,
+            status: { in: [...REPORT_ENROLLMENT_STATUSES] },
+          },
           select: {
             id: true,
             status: true,
@@ -145,7 +151,8 @@ export class ReportsService {
         const assignmentCells: Record<string, unknown> = {};
         for (const a of assignments) {
           const sub = submissions.find(
-            (s) => s.assignment_id === a.id && s.enrollment_id === enrollment.id,
+            (s) =>
+              s.assignment_id === a.id && s.enrollment_id === enrollment.id,
           );
           assignmentCells[String(a.id)] = {
             state: submissionState(sub, a.due_at, now),
@@ -356,7 +363,11 @@ export class ReportsService {
         const graded = exam_attempts.filter((t) =>
           (GRADED_ATTEMPT_STATUSES as readonly string[]).includes(t.status),
         );
-        return { ...e, attempts: exam_attempts, best: bestAttempt(graded) ?? null };
+        return {
+          ...e,
+          attempts: exam_attempts,
+          best: bestAttempt(graded) ?? null,
+        };
       }),
       materials: {
         total: materialsTotal,
@@ -372,16 +383,15 @@ export class ReportsService {
    */
   async dashboard(user: AuthUser) {
     // Only batches the person teaches count (admins: all of them).
-    const batchIds: bigint[] | 'all' =
-      isAdmin(user)
-        ? 'all'
-        : (
-            await this.prisma.batch_faculty.findMany({
-              where: { faculty_user_id: user.id },
-              select: { batch_id: true },
-              distinct: ['batch_id'],
-            })
-          ).map((r) => r.batch_id);
+    const batchIds: bigint[] | 'all' = isAdmin(user)
+      ? 'all'
+      : (
+          await this.prisma.batch_faculty.findMany({
+            where: { faculty_user_id: user.id },
+            select: { batch_id: true },
+            distinct: ['batch_id'],
+          })
+        ).map((r) => r.batch_id);
     const inBatches = batchIds === 'all' ? {} : { batch_id: { in: batchIds } };
     const now = new Date();
 
@@ -409,8 +419,17 @@ export class ReportsService {
     const examsWhere: Prisma.examsWhereInput = {
       status: 'PUBLISHED',
       OR: [{ closes_at: null }, { closes_at: { gte: now } }],
-      AND: [{ OR: [{ opens_at: null }, { opens_at: { lte: new Date(now.getTime() + 14 * DAY_MS) } }] }],
-      ...(batchIds === 'all' ? {} : { exam_batches: { some: { batch_id: { in: batchIds } } } }),
+      AND: [
+        {
+          OR: [
+            { opens_at: null },
+            { opens_at: { lte: new Date(now.getTime() + 14 * DAY_MS) } },
+          ],
+        },
+      ],
+      ...(batchIds === 'all'
+        ? {}
+        : { exam_batches: { some: { batch_id: { in: batchIds } } } }),
     };
 
     const [
@@ -432,10 +451,23 @@ export class ReportsService {
           id: true,
           submitted_at: true,
           assignments: {
-            select: { id: true, title: true, due_at: true, batches: { select: { id: true, code: true, name: true } } },
+            select: {
+              id: true,
+              title: true,
+              due_at: true,
+              batches: { select: { id: true, code: true, name: true } },
+            },
           },
           enrollments: {
-            select: { student_profiles: { select: { users: { select: { id: true, full_name: true, photo_url: true } } } } },
+            select: {
+              student_profiles: {
+                select: {
+                  users: {
+                    select: { id: true, full_name: true, photo_url: true },
+                  },
+                },
+              },
+            },
           },
         },
       }),
@@ -477,7 +509,9 @@ export class ReportsService {
           duration_minutes: true,
           exam_batches: {
             where: batchIds === 'all' ? {} : { batch_id: { in: batchIds } },
-            select: { batches: { select: { id: true, code: true, name: true } } },
+            select: {
+              batches: { select: { id: true, code: true, name: true } },
+            },
           },
         },
       }),
@@ -505,16 +539,24 @@ export class ReportsService {
         items: toReview.map((s) => ({
           submission_id: s.id,
           submitted_at: s.submitted_at,
-          assignment: { id: s.assignments.id, title: s.assignments.title, due_at: s.assignments.due_at },
+          assignment: {
+            id: s.assignments.id,
+            title: s.assignments.title,
+            due_at: s.assignments.due_at,
+          },
           batch: s.assignments.batches,
           student: s.enrollments.student_profiles.users,
         })),
       },
-      attendance_pending: { total: attendancePendingCount, items: attendancePending },
+      attendance_pending: {
+        total: attendancePendingCount,
+        items: attendancePending,
+      },
       due_soon: dueSoon.map(({ _count, ...a }) => ({
         ...a,
         submitted: _count.assignment_submissions,
-        enrolled: enrolled.find((e) => e.batch_id === a.batches.id)?._count._all ?? 0,
+        enrolled:
+          enrolled.find((e) => e.batch_id === a.batches.id)?._count._all ?? 0,
       })),
       upcoming_exams: upcomingExams.map(({ exam_batches, ...e }) => ({
         ...e,
@@ -539,14 +581,24 @@ export class ReportsService {
         exam_batches: { some: { batch_id: batchId } },
       },
       orderBy: [{ opens_at: 'asc' }, { id: 'asc' }],
-      select: { id: true, title: true, kind: true, total_marks: true, opens_at: true },
+      select: {
+        id: true,
+        title: true,
+        kind: true,
+        total_marks: true,
+        opens_at: true,
+      },
     });
   }
 
   /** Classes that have started and were not cancelled. */
   private heldSessionsCount(batchId: bigint) {
     return this.prisma.class_sessions.count({
-      where: { batch_id: batchId, status: { not: 'CANCELLED' }, starts_at: { lte: new Date() } },
+      where: {
+        batch_id: batchId,
+        status: { not: 'CANCELLED' },
+        starts_at: { lte: new Date() },
+      },
     });
   }
 
@@ -575,7 +627,9 @@ export class ReportsService {
 }
 
 /** Published materials in published chapters of the course (what students can see). */
-function publishedMaterialWhere(courseId: bigint): Prisma.study_materialsWhereInput {
+function publishedMaterialWhere(
+  courseId: bigint,
+): Prisma.study_materialsWhereInput {
   return {
     is_published: true,
     chapters: { is_published: true, course_subjects: { course_id: courseId } },
@@ -583,16 +637,20 @@ function publishedMaterialWhere(courseId: bigint): Prisma.study_materialsWhereIn
 }
 
 /** The attempt with the highest percentage (then score). */
-function bestAttempt<T extends { percentage: Prisma.Decimal | null; score: Prisma.Decimal | null }>(
-  attempts: T[],
-): T | undefined {
+function bestAttempt<
+  T extends { percentage: Prisma.Decimal | null; score: Prisma.Decimal | null },
+>(attempts: T[]): T | undefined {
   let best: T | undefined;
   for (const a of attempts) {
     if (!best) best = a;
     else {
       const pa = a.percentage?.toNumber() ?? -1;
       const pb = best.percentage?.toNumber() ?? -1;
-      if (pa > pb || (pa === pb && (a.score?.toNumber() ?? -1) > (best.score?.toNumber() ?? -1)))
+      if (
+        pa > pb ||
+        (pa === pb &&
+          (a.score?.toNumber() ?? -1) > (best.score?.toNumber() ?? -1))
+      )
         best = a;
     }
   }

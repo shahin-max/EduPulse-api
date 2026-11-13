@@ -62,10 +62,9 @@ export class CloudinaryService {
     const apiKey = config.get<string>('CLOUDINARY_API_KEY');
     const apiSecret = config.get<string>('CLOUDINARY_API_SECRET');
     this.enabled = !!(cloudName && apiKey && apiSecret);
-    this.folder = (config.get<string>('CLOUDINARY_FOLDER') || 'edupulse').replace(
-      /^\/+|\/+$/g,
-      '',
-    );
+    this.folder = (
+      config.get<string>('CLOUDINARY_FOLDER') || 'edupulse'
+    ).replace(/^\/+|\/+$/g, '');
     if (this.enabled) {
       cloudinary.config({
         cloud_name: cloudName,
@@ -145,7 +144,9 @@ export class CloudinaryService {
       });
     } catch (error) {
       // The database row is already gone; a stray object only costs storage.
-      this.logger.warn(`Could not delete ${publicId} from Cloudinary: ${describe(error)}`);
+      this.logger.warn(
+        `Could not delete ${publicId} from Cloudinary: ${describe(error)}`,
+      );
     }
   }
 

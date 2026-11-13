@@ -1,3 +1,4 @@
+import { ActivityNotifier } from '../communications/activity-notifier.service.js';
 import {
   BadRequestException,
   Body,
@@ -144,7 +145,10 @@ const enquiryInclude = {
 
 @Injectable()
 export class EnquiriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifier: ActivityNotifier,
+  ) {}
 
   async create(dto: CreateEnquiryDto) {
     if (dto.interestedCourseId !== undefined) {
@@ -222,7 +226,7 @@ export class EnquiriesService {
 
   /** Admins update anything; assigned faculty may only change the status. */
   async update(id: bigint, dto: UpdateEnquiryDto, actor: AuthUser) {
-    await this.findOne(id, actor);
+    const before = await this.findOne(id, actor);
     if (!isAdmin(actor) && dto.assignedTo !== undefined)
       throw new BadRequestException('Only admins can reassign enquiries');
     if (dto.assignedTo !== undefined && dto.assignedTo !== null) {
@@ -250,7 +254,7 @@ export class EnquiriesService {
         );
       }
     }
-    return this.prisma.admission_enquiries.update({
+    const updated = await this.prisma.admission_enquiries.update({
       where: { id },
       data: {
         status: dto.status,
@@ -263,6 +267,12 @@ export class EnquiriesService {
       },
       include: enquiryInclude,
     });
+    if (
+      updated.assigned_to !== null &&
+      updated.assigned_to !== before.assigned_to
+    )
+      await this.notifier.enquiryAssigned(id, updated.assigned_to, actor.id);
+    return updated;
   }
 }
 

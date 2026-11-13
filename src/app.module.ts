@@ -23,6 +23,7 @@ import { ClassesModule } from './classes/classes.module.js';
 import { FeesModule } from './fees/fees.module.js';
 import { CommunicationsModule } from './communications/communications.module.js';
 import { ReportsModule } from './reports/reports.module.js';
+import { StudentModule } from './student/student.module.js';
 import { HealthController } from './health/health.controller.js';
 
 @Module({
@@ -53,6 +54,7 @@ import { HealthController } from './health/health.controller.js';
     FeesModule,
     CommunicationsModule,
     ReportsModule,
+    StudentModule,
     AuditModule,
   ],
   controllers: [HealthController],

@@ -19,9 +19,9 @@ export interface PhotoUpload {
 export function isSupportedImage(buffer: Buffer): boolean {
   if (buffer.length < 12) return false;
   const jpeg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-  const png = buffer.subarray(0, 8).equals(
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  );
+  const png = buffer
+    .subarray(0, 8)
+    .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   const gif = buffer.subarray(0, 4).toString('latin1') === 'GIF8';
   const webp =
     buffer.subarray(0, 4).toString('latin1') === 'RIFF' &&
@@ -49,7 +49,10 @@ export class PhotosService {
       throw new BadRequestException('Upload a JPEG, PNG, WebP or GIF image');
     const user = await this.findUser(userId);
     // One photo per user, overwritten in place: the public id is the user's random public_id.
-    const result = await this.cloudinary.uploadPhoto(file.buffer, user.public_id);
+    const result = await this.cloudinary.uploadPhoto(
+      file.buffer,
+      user.public_id,
+    );
     const updated = await this.prisma.users.update({
       where: { id: userId },
       // secure_url includes the version, so browsers fetch the new photo instead of a cached one.

@@ -1,3 +1,4 @@
+import { ActivityNotifier } from '../communications/activity-notifier.service.js';
 import {
   BadRequestException,
   ConflictException,
@@ -98,7 +99,10 @@ const isUniqueViolation = (error: unknown) =>
 
 @Injectable()
 export class FeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifier: ActivityNotifier,
+  ) {}
 
   // ---------------------------------------------------------------- fee plans
 
@@ -248,6 +252,7 @@ export class FeesService {
       });
       return created.id;
     });
+    if (dto.issue) await this.notifier.invoiceIssued(id);
     return this.loadInvoice(id);
   }
 
@@ -506,6 +511,7 @@ export class FeesService {
         },
       });
     });
+    await this.notifier.invoiceIssued(id);
     return this.loadInvoice(id);
   }
 
@@ -610,6 +616,7 @@ export class FeesService {
         }
         return payment.id;
       });
+      await this.notifier.paymentConfirmed(paymentId);
       return this.loadPayment(paymentId);
     } catch (error) {
       // Two identical requests raced past the replay check: the loser returns the winner's payment.
@@ -680,6 +687,7 @@ export class FeesService {
       });
       await recompute(tx, payment.invoice_id);
     });
+    if (dto.status === 'CONFIRMED') await this.notifier.paymentConfirmed(id);
     return this.loadPayment(id);
   }
 

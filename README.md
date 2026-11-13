@@ -146,6 +146,16 @@ For admins and the faculty assigned to the batch:
 - `GET /batches/:id/students/:userId/report`: one student's attendance by class, assignments with feedback,
   every test attempt and study material progress.
 
+## Student portal views
+
+Students see only their current enrollments (ACTIVE and inside the access window):
+
+- `GET /student/courses`: current batches with teachers and study-material progress (completed / published).
+- `GET /student/assignments`: published and closed assignments across all current batches, each with the
+  student's submission and a `state` (MISSING, NOT_DUE, SUBMITTED, LATE, REVIEWED).
+- `GET /student/courses/:courseId/materials`: the course's published chapters by subject, with published
+  materials and the student's progress on each (403 without a current enrollment in the course).
+
 ## Project layout
 
 ```
@@ -165,6 +175,7 @@ src/audit/         audit interceptor and log
 src/mail/          email transport (SMTP, or logged when not configured)
 src/storage/       Cloudinary storage (files and profile photos)
 src/reports/       teaching dashboard, batch gradebook, student progress report
+src/student/       student portal views (courses, assignments, course materials)
 test/              e2e suites and helpers
 ```
 

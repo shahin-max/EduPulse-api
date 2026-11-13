@@ -1,3 +1,4 @@
+import { ActivityNotifier } from '../communications/activity-notifier.service.js';
 import {
   BadRequestException,
   ConflictException,
@@ -44,6 +45,7 @@ export class ExamsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
+    private readonly notifier: ActivityNotifier,
   ) {}
 
   // ---- Permissions ----
@@ -240,6 +242,8 @@ export class ExamsService {
           ]
         : []),
     ]);
+    if (updated.status === 'PUBLISHED' && exam.status !== 'PUBLISHED')
+      await this.notifier.examPublished(id);
     return updated;
   }
 
@@ -309,6 +313,9 @@ export class ExamsService {
     await this.prisma.exam_batches.create({
       data: { exam_id: examId, batch_id: batchId },
     });
+    // A batch added to a test that is already live hears about it now.
+    if (exam.status === 'PUBLISHED')
+      await this.notifier.examPublished(examId, [batchId]);
     return this.detail(examId);
   }
 

@@ -1,3 +1,4 @@
+import { ActivityNotifier } from '../communications/activity-notifier.service.js';
 import {
   BadRequestException,
   ConflictException,
@@ -72,6 +73,7 @@ export class AssignmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
+    private readonly notifier: ActivityNotifier,
   ) {}
 
   async create(dto: CreateAssignmentDto, user: AuthUser) {
@@ -79,7 +81,7 @@ export class AssignmentsService {
     await this.access.assertCanManageBatch(user, batchId);
     await this.assertSubjectInBatch(batchId, dto.subjectId);
     await this.assertAsset(dto.attachmentAssetId);
-    return this.prisma.assignments.create({
+    const created = await this.prisma.assignments.create({
       data: {
         batch_id: batchId,
         subject_id:
@@ -97,6 +99,9 @@ export class AssignmentsService {
       },
       include: assignmentInclude,
     });
+    if (created.status === 'PUBLISHED')
+      await this.notifier.assignmentPublished(created.id);
+    return created;
   }
 
   /**
@@ -164,7 +169,7 @@ export class AssignmentsService {
           `maxMarks is below the marks already awarded to ${over} submission(s)`,
         );
     }
-    return this.prisma.assignments.update({
+    const updated = await this.prisma.assignments.update({
       where: { id },
       data: {
         subject_id:
@@ -187,6 +192,10 @@ export class AssignmentsService {
       },
       include: assignmentInclude,
     });
+    // Students hear about an assignment when it is first published (re-publishing is de-duplicated).
+    if (updated.status === 'PUBLISHED' && assignment.status !== 'PUBLISHED')
+      await this.notifier.assignmentPublished(id);
+    return updated;
   }
 
   /** 409 (via the Prisma filter) once students have submitted; close it instead. */
@@ -321,6 +330,7 @@ export class AssignmentsService {
       },
       include: submissionInclude,
     });
+    await this.notifier.submissionReviewed(submissionId);
     return present(saved, submission.assignments.due_at);
   }
 

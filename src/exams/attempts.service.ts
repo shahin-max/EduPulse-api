@@ -50,6 +50,11 @@ export class AttemptsService {
         courses: { select: { id: true, code: true, title: true } },
         subjects: { select: { id: true, code: true, name: true } },
         _count: { select: { exam_questions: true } },
+        // The student's own batches taking this exam; more than one means POST start needs batchId.
+        exam_batches: {
+          where: { batch_id: { in: enrollments.map((e) => e.batch_id) } },
+          select: { batches: { select: { id: true, code: true, name: true } } },
+        },
       },
       orderBy: [{ opens_at: 'asc' }, { id: 'asc' }],
     });
@@ -60,7 +65,7 @@ export class AttemptsService {
       },
       select: { exam_id: true, status: true, id: true, expires_at: true },
     });
-    return exams.map(({ created_by: _c, ...exam }) => {
+    return exams.map(({ created_by: _c, exam_batches, ...exam }) => {
       const mine = attempts.filter((a) => a.exam_id === exam.id);
       const used = mine.filter((a) => a.status !== 'INVALIDATED').length;
       const inProgress = mine.find(
@@ -72,6 +77,7 @@ export class AttemptsService {
         attempts_used: used,
         attempts_remaining: Math.max(exam.max_attempts - used, 0),
         in_progress_attempt_id: inProgress?.id ?? null,
+        my_batches: exam_batches.map((b) => b.batches),
       };
     });
   }
