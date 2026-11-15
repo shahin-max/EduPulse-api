@@ -4,6 +4,7 @@ import { AuthUser } from '../common/auth.js';
 import { currentEnrollmentWhere } from '../common/access.service.js';
 import { isLate } from '../learning/assignments.service.js';
 import { submissionState } from '../reports/reports.service.js';
+import { subjectPerformance } from '../reports/subject-performance.js';
 
 const publishedChapters = (courseId: bigint) => ({
   is_published: true,
@@ -246,5 +247,24 @@ export class StudentService {
           })),
         })),
     };
+  }
+
+  /**
+   * Your results per subject, across your current and past batches: tests (best graded attempt of
+   * each released test, counted per question) and marked assignments.
+   */
+  async performance(user: AuthUser) {
+    const enrollments = await this.prisma.enrollments.findMany({
+      where: {
+        student_user_id: user.id,
+        status: { in: ['ACTIVE', 'PAUSED', 'COMPLETED'] },
+      },
+      select: { id: true },
+    });
+    return subjectPerformance(
+      this.prisma,
+      enrollments.map((e) => e.id),
+      { studentView: true },
+    );
   }
 }

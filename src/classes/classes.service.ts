@@ -1,3 +1,4 @@
+import { ActivityNotifier } from '../communications/activity-notifier.service.js';
 import {
   BadRequestException,
   Injectable,
@@ -35,6 +36,7 @@ export class ClassesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
+    private readonly notifier: ActivityNotifier,
   ) {}
 
   async create(dto: CreateClassSessionDto, user: AuthUser) {
@@ -56,7 +58,7 @@ export class ClassesService {
     }
     await this.assertTeachesBatch(batchId, facultyId);
 
-    return this.prisma.class_sessions.create({
+    const created = await this.prisma.class_sessions.create({
       data: {
         batch_id: batchId,
         subject_id: subjectId,
@@ -69,6 +71,8 @@ export class ClassesService {
       },
       include: sessionInclude,
     });
+    await this.notifier.classScheduled(created.id);
+    return created;
   }
 
   async list(query: ListClassSessionsQueryDto, user: AuthUser) {
@@ -139,7 +143,7 @@ export class ClassesService {
         dto.facultyUserId === null ? null : BigInt(dto.facultyUserId),
       );
     }
-    return this.prisma.class_sessions.update({
+    const updated = await this.prisma.class_sessions.update({
       where: { id },
       data: {
         subject_id:
@@ -163,6 +167,8 @@ export class ClassesService {
       },
       include: sessionInclude,
     });
+    await this.notifier.classUpdated(id, session);
+    return updated;
   }
 
   async cancel(id: bigint, user: AuthUser) {

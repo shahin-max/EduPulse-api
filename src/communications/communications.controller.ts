@@ -16,6 +16,7 @@ import type { AuthUser } from '../common/auth.js';
 import { CurrentUser, RoleCode, Roles, SkipAudit } from '../common/auth.js';
 import { AnnouncementsService } from './announcements.service.js';
 import { NotificationsService } from './notifications.service.js';
+import { ActivityNotifier } from './activity-notifier.service.js';
 import {
   CreateAnnouncementDto,
   FeedQueryDto,
@@ -108,6 +109,7 @@ export class NotificationsController {
   constructor(
     private readonly notifications: NotificationsService,
     private readonly announcements: AnnouncementsService,
+    private readonly activity: ActivityNotifier,
   ) {}
 
   /** Your notifications, newest first; meta.unread is your unread count. */
@@ -117,6 +119,7 @@ export class NotificationsController {
     @CurrentUser() user: AuthUser,
   ) {
     await this.announcements.dispatchDueLazily();
+    await this.activity.remindUpcomingClassesLazily();
     return this.notifications.listMine(user.id, query);
   }
 

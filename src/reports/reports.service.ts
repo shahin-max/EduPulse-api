@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { subjectPerformance } from './subject-performance.js';
 import {
   AccessService,
   currentEnrollmentWhere,
@@ -379,6 +380,9 @@ export class ReportsService {
         completed: progressCount('COMPLETED'),
         in_progress: progressCount('IN_PROGRESS'),
       },
+      subjects: await subjectPerformance(this.prisma, [enrollment.id], {
+        studentView: false,
+      }),
     };
   }
 

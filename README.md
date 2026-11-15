@@ -160,6 +160,10 @@ include `_count.enquiry_notes`.
 Besides announcements, the API notifies (in-app, best-effort, once per item): students when an assignment or
 test is published for their batch, when their work is marked, when an invoice is issued and when a payment is
 confirmed; staff when an enquiry is assigned to them. Links point at the student/faculty portal pages.
+Classes: the batch is told when a future class is scheduled, moved (old and new time), cancelled or gets a
+recording, and students plus the class teacher get a "Class at 5:30 pm" reminder for classes starting within the
+hour. There is no job scheduler: reminders run when notifications are read (the portal bell polls every minute),
+at most once a minute per instance, and each person gets each reminder once.
 
 ## Student portal views
 
@@ -170,6 +174,10 @@ Students see only their current enrollments (ACTIVE and inside the access window
   student's submission and a `state` (MISSING, NOT_DUE, SUBMITTED, LATE, REVIEWED).
 - `GET /student/courses/:courseId/materials`: the course's published chapters by subject, with published
   materials and the student's progress on each (403 without a current enrollment in the course).
+- `GET /student/performance`: results per subject. Every question belongs to a subject, so a mixed test counts
+  towards each subject it covers (best graded attempt per test, released results only), plus marked assignments
+  that have a subject and maximum marks. Staff get the same `subjects` (including unreleased tests) in
+  `GET /batches/:id/students/:userId/report`.
 - After a batch ends (enrollment COMPLETED, PAUSED or past its access window) students can still read that
   batch's assignments, attachments and their own submissions and feedback; `current: false` in
   `/student/assignments` and `can_submit: false` on `GET /assignments/:id`. Handing in work, tests and study

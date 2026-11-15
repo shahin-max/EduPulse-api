@@ -26,6 +26,12 @@ export class StudentController {
     return this.student.assignments(user);
   }
 
+  /** Your results per subject: tests (released results only) and marked assignments. */
+  @Get('performance')
+  performance(@CurrentUser() user: AuthUser) {
+    return this.student.performance(user);
+  }
+
   /** A course's published chapters and materials with your progress on each. */
   @Get('courses/:courseId/materials')
   courseMaterials(

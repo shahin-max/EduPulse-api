@@ -16,6 +16,17 @@ const rupees = (value: Prisma.Decimal | string | number) =>
     maximumFractionDigits: 2,
   });
 
+/** "5:30 pm" in India time. */
+const shortTime = (date: Date) =>
+  date.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+/** Student timetable link for a class (the query keeps links unique per class for de-duplication). */
+const classLink = (id: bigint) => `/student/classes?class=${id}`;
+
 const shortDate = (date: Date) =>
   date.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -39,6 +50,7 @@ const marks = (value: Prisma.Decimal) => String(Number(value));
 @Injectable()
 export class ActivityNotifier {
   private readonly logger = new Logger(ActivityNotifier.name);
+  private lastReminderRun = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -197,6 +209,127 @@ export class ActivityNotifier {
         // Faculty follow up in their portal; admins also open it there or in the admin portal.
         linkUrl: '/teach/enquiries',
       });
+    });
+  }
+
+  /** A class scheduled in the future: its batch's current students. */
+  classScheduled(sessionId: bigint) {
+    return this.safe('class', async () => {
+      const c = await this.session(sessionId);
+      if (!c || c.status !== 'SCHEDULED' || c.starts_at <= new Date()) return;
+      await this.once(await this.batchStudents([c.batch_id]), {
+        title: `New class: ${c.title}`,
+        message: `${shortDate(c.starts_at)}${c.subjects ? ` · ${c.subjects.name}` : ''}${c.meeting_url ? ' · online' : ''}.`,
+        linkUrl: classLink(sessionId),
+      });
+    });
+  }
+
+  /**
+   * After a class was edited: tells the batch when it was cancelled, moved to another time or got
+   * its recording. `before` is the row as it was before the update.
+   */
+  classUpdated(
+    sessionId: bigint,
+    before: {
+      status: string;
+      starts_at: Date;
+      ends_at: Date;
+      recording_url: string | null;
+    },
+  ) {
+    return this.safe('class change', async () => {
+      const c = await this.session(sessionId);
+      if (!c) return;
+      const students = await this.batchStudents([c.batch_id]);
+      const link = classLink(sessionId);
+      if (c.status === 'CANCELLED' && before.status !== 'CANCELLED') {
+        await this.once(students, {
+          title: `Class cancelled: ${c.title}`,
+          message: `The class on ${shortDate(before.starts_at)} will not take place.`,
+          linkUrl: link,
+        });
+        return;
+      }
+      const moved =
+        c.starts_at.getTime() !== before.starts_at.getTime() ||
+        c.ends_at.getTime() !== before.ends_at.getTime();
+      if (c.status === 'SCHEDULED' && moved && c.starts_at > new Date()) {
+        // Not de-duplicated: a class can be moved more than once, and each move matters.
+        await this.notifications.notify(students, {
+          title: `Class moved: ${c.title}`,
+          message: `Now ${shortDate(c.starts_at)} (was ${shortDate(before.starts_at)}).`,
+          linkUrl: link,
+        });
+      }
+      if (c.recording_url && !before.recording_url) {
+        await this.once(students, {
+          title: `Recording available: ${c.title}`,
+          message: `The recording of the class on ${shortDate(c.starts_at)} is ready to watch.`,
+          linkUrl: link,
+        });
+      }
+    });
+  }
+
+  /**
+   * "Class at 5:30 pm" reminders for classes starting within the next hour, to the batch's students
+   * and the class teacher, once each. There is no job scheduler: like scheduled announcements this
+   * runs when notifications are read (the portal bell polls every minute), at most once a minute.
+   */
+  async remindUpcomingClassesLazily(): Promise<void> {
+    if (Date.now() - this.lastReminderRun < 60_000) return;
+    this.lastReminderRun = Date.now();
+    await this.safe('class reminders', async () => {
+      const now = new Date();
+      const soon = await this.prisma.class_sessions.findMany({
+        where: {
+          status: 'SCHEDULED',
+          starts_at: { gt: now, lte: new Date(now.getTime() + 60 * 60 * 1000) },
+        },
+        select: {
+          id: true,
+          batch_id: true,
+          title: true,
+          starts_at: true,
+          meeting_url: true,
+          faculty_user_id: true,
+        },
+      });
+      for (const c of soon) {
+        const at = shortTime(c.starts_at);
+        const message = c.meeting_url
+          ? 'Online class: the join link opens 15 minutes before the start.'
+          : 'Please be on time.';
+        await this.once(await this.batchStudents([c.batch_id]), {
+          title: `Class at ${at}: ${c.title}`,
+          message,
+          linkUrl: classLink(c.id),
+        });
+        if (c.faculty_user_id)
+          await this.once([c.faculty_user_id], {
+            title: `Class at ${at}: ${c.title}`,
+            message: 'Your class starts within the hour.',
+            linkUrl: `/teach/classes/${c.id}`,
+          });
+      }
+    });
+  }
+
+  private session(id: bigint) {
+    return this.prisma.class_sessions.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        batch_id: true,
+        title: true,
+        status: true,
+        starts_at: true,
+        ends_at: true,
+        meeting_url: true,
+        recording_url: true,
+        subjects: { select: { name: true } },
+      },
     });
   }
 
