@@ -21,6 +21,16 @@ export class ReportsController {
   }
 
   /**
+   * Admin home charts: fee collections, new enrollments and enquiries (with conversions) for the
+   * last 6 months, and attendance per active batch. Admin only.
+   */
+  @Roles(RoleCode.ADMIN)
+  @Get('reports/admin-summary')
+  adminSummary() {
+    return this.reports.adminSummary();
+  }
+
+  /**
    * The batch gradebook: every student (active, paused or completed enrollment) with attendance,
    * each published assignment, each exam (best graded attempt) and study materials completed.
    */

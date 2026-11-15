@@ -81,13 +81,17 @@ export class LearningAccessService {
     });
     if (viaMaterial) return true;
 
+    // Assignment attachments stay readable after the batch ends, like the student's own work.
     const viaAssignment = await this.prisma.assignments.findFirst({
       where: {
         attachment_asset_id: file.id,
         status: { in: ['PUBLISHED', 'CLOSED'] },
         batches: {
           enrollments: {
-            some: { student_user_id: user.id, ...currentEnrollmentWhere() },
+            some: {
+              student_user_id: user.id,
+              status: { in: ['ACTIVE', 'PAUSED', 'COMPLETED'] },
+            },
           },
         },
       },

@@ -90,6 +90,22 @@ export class AccessService {
   }
 
   /**
+   * The student's most recent enrollment in the batch that ever gave access (ACTIVE, PAUSED or
+   * COMPLETED), ignoring the access window. Used to let students re-read their own past work,
+   * read-only, after a batch ends; anything that changes data still needs `activeEnrollment`.
+   */
+  pastEnrollment(studentUserId: bigint, batchId: bigint) {
+    return this.prisma.enrollments.findFirst({
+      where: {
+        student_user_id: studentUserId,
+        batch_id: batchId,
+        status: { in: ['ACTIVE', 'PAUSED', 'COMPLETED'] },
+      },
+      orderBy: { enrolled_at: 'desc' },
+    });
+  }
+
+  /**
    * Allows managers of the batch and its actively enrolled students.
    * Returns the student's enrollment (null for admins and faculty).
    */

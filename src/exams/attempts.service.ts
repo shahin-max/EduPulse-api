@@ -195,6 +195,7 @@ export class AttemptsService {
             kind: true,
             show_result_immediately: true,
             results_release_at: true,
+            answer_review_release_at: true,
           },
         },
       },
@@ -457,7 +458,12 @@ function summarise(
   attempt: exam_attempts,
   exam: Pick<
     exams,
-    'id' | 'title' | 'kind' | 'show_result_immediately' | 'results_release_at'
+    | 'id'
+    | 'title'
+    | 'kind'
+    | 'show_result_immediately'
+    | 'results_release_at'
+    | 'answer_review_release_at'
   >,
   staff: boolean,
 ) {
@@ -465,7 +471,17 @@ function summarise(
     staff || (attempt.status !== 'IN_PROGRESS' && resultsVisible(exam));
   return {
     id: attempt.id,
-    exam: { id: exam.id, title: exam.title, kind: exam.kind },
+    exam: {
+      id: exam.id,
+      title: exam.title,
+      kind: exam.kind,
+      // When the score and the answer review become visible, so the student portal can say
+      // "results on 20 Nov" (null review date = never shown to students).
+      results_release_at: exam.show_result_immediately
+        ? null
+        : exam.results_release_at,
+      answer_review_release_at: exam.answer_review_release_at,
+    },
     batch_id: attempt.batch_id,
     enrollment_id: attempt.enrollment_id,
     attempt_number: attempt.attempt_number,

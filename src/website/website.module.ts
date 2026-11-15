@@ -115,6 +115,14 @@ export class UpdateEnquiryDto {
   assignedTo?: number | null;
 }
 
+export class AddEnquiryNoteDto {
+  /** What happened on the call, e.g. "Asked to call back on Monday after 5 pm". */
+  @Transform(trim)
+  @IsString()
+  @Length(1, 2000)
+  body: string;
+}
+
 export class ListEnquiriesQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(Object.values(admission_enquiries_status))
@@ -141,6 +149,7 @@ export class ListEnquiriesQueryDto extends PaginationQueryDto {
 const enquiryInclude = {
   courses: { select: { id: true, code: true, title: true } },
   users: { select: { id: true, full_name: true } },
+  _count: { select: { enquiry_notes: true } },
 } satisfies Prisma.admission_enquiriesInclude;
 
 @Injectable()
@@ -274,6 +283,46 @@ export class EnquiriesService {
       await this.notifier.enquiryAssigned(id, updated.assigned_to, actor.id);
     return updated;
   }
+
+  /** Call notes, oldest first. Same access as the enquiry: admins, or the assigned faculty member. */
+  async notes(id: bigint, actor: AuthUser) {
+    await this.findOne(id, actor);
+    return this.prisma.enquiry_notes.findMany({
+      where: { enquiry_id: id },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        body: true,
+        created_at: true,
+        users: { select: { id: true, full_name: true } },
+      },
+    });
+  }
+
+  async addNote(id: bigint, dto: AddEnquiryNoteDto, actor: AuthUser) {
+    const enquiry = await this.findOne(id, actor);
+    const [note] = await this.prisma.$transaction([
+      this.prisma.enquiry_notes.create({
+        data: { enquiry_id: id, author_id: actor.id, body: dto.body },
+        select: {
+          id: true,
+          body: true,
+          created_at: true,
+          users: { select: { id: true, full_name: true } },
+        },
+      }),
+      // A first call moves a NEW enquiry to CONTACTED, so the list reflects that someone called.
+      ...(enquiry.status === 'NEW'
+        ? [
+            this.prisma.admission_enquiries.update({
+              where: { id },
+              data: { status: 'CONTACTED' },
+            }),
+          ]
+        : []),
+    ]);
+    return note;
+  }
 }
 
 @ApiTags('Admission enquiries')
@@ -308,6 +357,26 @@ export class EnquiriesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.enquiries.findOne(BigInt(id), user);
+  }
+
+  /** Call notes on the enquiry, oldest first. */
+  @ApiBearerAuth()
+  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Get(':id/notes')
+  notes(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.enquiries.notes(BigInt(id), user);
+  }
+
+  /** Add a call note. The first note on a NEW enquiry marks it CONTACTED. */
+  @ApiBearerAuth()
+  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Post(':id/notes')
+  addNote(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddEnquiryNoteDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.enquiries.addNote(BigInt(id), dto, user);
   }
 
   /** Update follow-up status (NEW, CONTACTED, FOLLOW_UP, CONVERTED, CLOSED) or assignee. */

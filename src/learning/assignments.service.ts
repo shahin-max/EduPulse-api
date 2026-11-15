@@ -143,15 +143,30 @@ export class AssignmentsService {
     }));
   }
 
+  /**
+   * Managers see any assignment of their batch. Students see published or closed ones of a batch
+   * they are enrolled in now, or were enrolled in before (read-only); `can_submit` says whether
+   * they can still hand in work.
+   */
   async findOne(id: bigint, user: AuthUser) {
     const assignment = await this.getAssignment(id);
-    const enrollment = await this.access.assertCanViewBatch(
-      user,
-      assignment.batch_id,
-    );
-    if (enrollment && assignment.status === 'DRAFT')
+    if (await this.access.canManageBatch(user, assignment.batch_id))
+      return assignment;
+    const current = hasRole(user, RoleCode.STUDENT)
+      ? await this.access.activeEnrollment(user.id, assignment.batch_id)
+      : null;
+    const past =
+      current ??
+      (hasRole(user, RoleCode.STUDENT)
+        ? await this.access.pastEnrollment(user.id, assignment.batch_id)
+        : null);
+    if (!past) throw new ForbiddenException('You are not part of this batch');
+    if (assignment.status === 'DRAFT')
       throw new NotFoundException('Assignment not found');
-    return assignment;
+    return {
+      ...assignment,
+      can_submit: !!current && assignment.status === 'PUBLISHED',
+    };
   }
 
   async update(id: bigint, dto: UpdateAssignmentDto, user: AuthUser) {
@@ -276,12 +291,12 @@ export class AssignmentsService {
   }
 
   /** The logged-in student's submission for the assignment. */
+  /** Your submission, also after the batch has ended (read-only). */
   async mySubmission(id: bigint, user: AuthUser) {
     const assignment = await this.getAssignment(id);
-    const enrollment = await this.access.activeEnrollment(
-      user.id,
-      assignment.batch_id,
-    );
+    const enrollment =
+      (await this.access.activeEnrollment(user.id, assignment.batch_id)) ??
+      (await this.access.pastEnrollment(user.id, assignment.batch_id));
     const submission = enrollment
       ? await this.prisma.assignment_submissions.findUnique({
           where: {

@@ -145,6 +145,21 @@ For admins and the faculty assigned to the batch:
   reviewed + marks), each test (best graded attempt) and study materials completed.
 - `GET /batches/:id/students/:userId/report`: one student's attendance by class, assignments with feedback,
   every test attempt and study material progress.
+- The dashboard also lists `low_attendance`: actively enrolled students under 75% (3+ classes counted).
+- `GET /reports/admin-summary` (admin): fee collections (confirmed payments minus refunds), new enrollments and
+  enquiries with conversions for the last 6 months (IST), and attendance per active batch.
+
+## Enquiry call notes
+
+`GET/POST /admission-enquiries/:id/notes` (admins, or the faculty member the enquiry is assigned to). Notes are
+kept in `enquiry_notes`, oldest first; the first note on a NEW enquiry marks it CONTACTED. Enquiry responses
+include `_count.enquiry_notes`.
+
+## Notifications
+
+Besides announcements, the API notifies (in-app, best-effort, once per item): students when an assignment or
+test is published for their batch, when their work is marked, when an invoice is issued and when a payment is
+confirmed; staff when an enquiry is assigned to them. Links point at the student/faculty portal pages.
 
 ## Student portal views
 
@@ -155,6 +170,12 @@ Students see only their current enrollments (ACTIVE and inside the access window
   student's submission and a `state` (MISSING, NOT_DUE, SUBMITTED, LATE, REVIEWED).
 - `GET /student/courses/:courseId/materials`: the course's published chapters by subject, with published
   materials and the student's progress on each (403 without a current enrollment in the course).
+- After a batch ends (enrollment COMPLETED, PAUSED or past its access window) students can still read that
+  batch's assignments, attachments and their own submissions and feedback; `current: false` in
+  `/student/assignments` and `can_submit: false` on `GET /assignments/:id`. Handing in work, tests and study
+  materials still need a current enrollment.
+- Attempts include `exam.results_release_at` and `exam.answer_review_release_at` so the portal can say when
+  results and the answer review open.
 
 ## Project layout
 

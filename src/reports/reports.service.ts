@@ -1,13 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { AccessService } from '../common/access.service.js';
+import {
+  AccessService,
+  currentEnrollmentWhere,
+} from '../common/access.service.js';
 import { AuthUser, isAdmin } from '../common/auth.js';
 
 /** Enrollments that count as the batch's students in reports (not pending or cancelled). */
 const REPORT_ENROLLMENT_STATUSES = ['ACTIVE', 'PAUSED', 'COMPLETED'] as const;
 const GRADED_ATTEMPT_STATUSES = ['SUBMITTED', 'AUTO_SUBMITTED'] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Below this attendance a student is flagged (same as the website). */
+const LOW_ATTENDANCE = 75;
 
 export type AttendanceSummary = {
   present: number;
@@ -563,6 +568,159 @@ export class ReportsService {
         batches: exam_batches.map((b) => b.batches),
       })),
       enquiries: { new: newEnquiries, follow_up: followUps },
+      low_attendance: await this.lowAttendance(batchIds),
+    };
+  }
+
+  /**
+   * Actively enrolled students below LOW_ATTENDANCE across the given batches (lowest first, at
+   * most 10), once at least 3 classes have been counted for them.
+   */
+  private async lowAttendance(batchIds: bigint[] | 'all') {
+    const enrollments = await this.prisma.enrollments.findMany({
+      where: {
+        ...(batchIds === 'all' ? {} : { batch_id: { in: batchIds } }),
+        ...currentEnrollmentWhere(),
+        batches: { status: 'ACTIVE' },
+      },
+      select: {
+        id: true,
+        student_user_id: true,
+        batches: { select: { id: true, code: true, name: true } },
+        student_profiles: {
+          select: { users: { select: { full_name: true, photo_url: true } } },
+        },
+      },
+    });
+    if (!enrollments.length) return [];
+    const rows = await this.prisma.class_attendance.groupBy({
+      by: ['enrollment_id', 'status'],
+      where: { enrollment_id: { in: enrollments.map((e) => e.id) } },
+      _count: { _all: true },
+    });
+    return enrollments
+      .map((e) => {
+        const counts: Record<string, number> = {};
+        for (const r of rows)
+          if (r.enrollment_id === e.id) counts[r.status] = r._count._all;
+        const summary = attendanceSummary(counts);
+        return {
+          enrollment_id: e.id,
+          user_id: e.student_user_id,
+          full_name: e.student_profiles.users.full_name,
+          photo_url: e.student_profiles.users.photo_url,
+          batch: e.batches,
+          counted: summary.present + summary.late + summary.absent,
+          ...summary,
+        };
+      })
+      .filter(
+        (s) =>
+          s.counted >= 3 &&
+          s.percentage !== null &&
+          s.percentage < LOW_ATTENDANCE,
+      )
+      .sort((a, b) => (a.percentage ?? 0) - (b.percentage ?? 0))
+      .slice(0, 10);
+  }
+
+  /**
+   * Admin home charts for the last `months` calendar months (IST), oldest first: fee collections
+   * (confirmed payments minus confirmed refunds), new enrollments, enquiries and how many of them
+   * converted, plus attendance per active batch.
+   */
+  async adminSummary(months = 6) {
+    const IST_MS = 330 * 60 * 1000;
+    const nowIst = new Date(Date.now() + IST_MS);
+    const keys: string[] = [];
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(
+        Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth() - i, 1),
+      );
+      keys.push(d.toISOString().slice(0, 7));
+    }
+    // The first instant of the oldest month in IST, as a real UTC timestamp.
+    const from = new Date(Date.parse(`${keys[0]}-01T00:00:00Z`) - IST_MS);
+    const monthOf = (date: Date) =>
+      new Date(date.getTime() + IST_MS).toISOString().slice(0, 7);
+    const bucket = () => Object.fromEntries(keys.map((k) => [k, 0]));
+
+    const [payments, refunds, enrollments, enquiries, batches] =
+      await Promise.all([
+        this.prisma.payments.findMany({
+          where: { status: 'CONFIRMED', paid_at: { gte: from } },
+          select: { amount: true, paid_at: true },
+        }),
+        this.prisma.payment_refunds.findMany({
+          where: {
+            status: 'CONFIRMED',
+            OR: [
+              { refunded_at: { gte: from } },
+              { refunded_at: null, created_at: { gte: from } },
+            ],
+          },
+          select: { amount: true, refunded_at: true, created_at: true },
+        }),
+        this.prisma.enrollments.findMany({
+          where: { enrolled_at: { gte: from }, status: { not: 'CANCELLED' } },
+          select: { enrolled_at: true },
+        }),
+        this.prisma.admission_enquiries.findMany({
+          where: { created_at: { gte: from } },
+          select: { created_at: true, status: true },
+        }),
+        this.prisma.batches.findMany({
+          where: { status: 'ACTIVE' },
+          select: { id: true, code: true, name: true },
+          orderBy: { name: 'asc' },
+        }),
+      ]);
+
+    const collected = bucket();
+    for (const p of payments)
+      if (p.paid_at) collected[monthOf(p.paid_at)] += Number(p.amount);
+    for (const r of refunds) {
+      const key = monthOf(r.refunded_at ?? r.created_at);
+      if (key in collected) collected[key] -= Number(r.amount);
+    }
+    const enrolled = bucket();
+    for (const e of enrollments) enrolled[monthOf(e.enrolled_at)] += 1;
+    const enquired = bucket();
+    const converted = bucket();
+    for (const e of enquiries) {
+      const key = monthOf(e.created_at);
+      enquired[key] += 1;
+      if (e.status === 'CONVERTED') converted[key] += 1;
+    }
+
+    const attendance = batches.length
+      ? await this.prisma.class_attendance.groupBy({
+          by: ['batch_id', 'status'],
+          where: { batch_id: { in: batches.map((b) => b.id) } },
+          _count: { _all: true },
+        })
+      : [];
+
+    return {
+      months: keys,
+      collections: keys.map((k) => Math.round(collected[k] * 100) / 100),
+      enrollments: keys.map((k) => enrolled[k]),
+      enquiries: keys.map((k) => ({
+        total: enquired[k],
+        converted: converted[k],
+      })),
+      batch_attendance: batches.map((b) => {
+        const counts: Record<string, number> = {};
+        for (const r of attendance)
+          if (r.batch_id === b.id) counts[r.status] = r._count._all;
+        const summary = attendanceSummary(counts);
+        return {
+          batch: b,
+          percentage: summary.percentage,
+          marked:
+            summary.present + summary.late + summary.absent + summary.excused,
+        };
+      }),
     };
   }
 

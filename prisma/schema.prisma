@@ -33,6 +33,7 @@ model admission_enquiries {
   users                users?                     @relation(fields: [assigned_to], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enquiries_assignee")
   branches             branches?                  @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enquiries_branch")
   courses              courses?                   @relation(fields: [interested_course_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_enquiries_course")
+  enquiry_notes        enquiry_notes[]
 
   @@index([assigned_to], map: "fk_enquiries_assignee")
   @@index([branch_id, status, created_at], map: "idx_enquiries_branch")
@@ -826,6 +827,7 @@ model users {
   study_materials        study_materials[]
   user_roles             user_roles[]
   website_content        website_content[]
+  enquiry_notes          enquiry_notes[]
 
   @@index([created_at], map: "idx_users_created")
   @@index([status], map: "idx_users_status")
@@ -1013,4 +1015,18 @@ enum exams_status {
   DRAFT
   PUBLISHED
   CLOSED
+}
+
+/// Call notes on an admission enquiry, newest last. Deleted with the enquiry.
+model enquiry_notes {
+  id                  BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  enquiry_id          BigInt              @db.UnsignedBigInt
+  author_id           BigInt?             @db.UnsignedBigInt
+  body                String              @db.Text
+  created_at          DateTime            @default(now())
+  admission_enquiries admission_enquiries @relation(fields: [enquiry_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_enquiry_notes_enquiry")
+  users               users?              @relation(fields: [author_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_enquiry_notes_author")
+
+  @@index([enquiry_id, created_at], map: "idx_enquiry_notes_enquiry")
+  @@index([author_id], map: "fk_enquiry_notes_author")
 }

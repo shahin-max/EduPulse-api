@@ -316,7 +316,14 @@ export class BatchesService {
             grade: true,
             guardian_name: true,
             guardian_mobile: true,
-            users: { select: { full_name: true, email: true, mobile: true } },
+            users: {
+              select: {
+                full_name: true,
+                email: true,
+                mobile: true,
+                photo_url: true,
+              },
+            },
           },
         },
       },

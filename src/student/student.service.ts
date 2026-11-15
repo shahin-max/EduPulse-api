@@ -98,8 +98,20 @@ export class StudentService {
 
   /** Every published or closed assignment in the student's current batches, with their submission. */
   async assignments(user: AuthUser) {
-    const enrollments = await this.currentEnrollments(user.id);
+    // Current batches, plus past ones (completed, paused or expired) so students can still read
+    // their own work and feedback; `current: false` rows are read-only.
+    const [enrollments, current] = await Promise.all([
+      this.prisma.enrollments.findMany({
+        where: {
+          student_user_id: user.id,
+          status: { in: ['ACTIVE', 'PAUSED', 'COMPLETED'] },
+        },
+        select: { id: true, batch_id: true },
+      }),
+      this.currentEnrollments(user.id),
+    ]);
     if (!enrollments.length) return [];
+    const currentBatches = new Set(current.map((e) => e.batch_id));
     const rows = await this.prisma.assignments.findMany({
       where: {
         batch_id: { in: enrollments.map((e) => e.batch_id) },
@@ -133,6 +145,7 @@ export class StudentService {
       const sub = assignment_submissions[0];
       return {
         ...a,
+        current: currentBatches.has(a.batch_id),
         state: submissionState(sub, a.due_at, now),
         my_submission: sub
           ? { ...sub, is_late: isLate(sub.submitted_at, a.due_at) }
