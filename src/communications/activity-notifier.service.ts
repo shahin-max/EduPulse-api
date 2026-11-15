@@ -203,11 +203,15 @@ export class ActivityNotifier {
         },
       });
       if (!e) return;
+      // The faculty portal is for the Faculty role only, so admins who don't teach go to the admin portal.
+      const faculty = await this.prisma.user_roles.findFirst({
+        where: { user_id: assigneeId, roles: { code: 'FACULTY' } },
+        select: { user_id: true },
+      });
       await this.notifications.notify([assigneeId], {
         title: `Enquiry assigned: ${e.student_name}`,
         message: `${e.mobile}${e.courses ? ` · interested in ${e.courses.title}` : ''}. Please call them back.`,
-        // Faculty follow up in their portal; admins also open it there or in the admin portal.
-        linkUrl: '/teach/enquiries',
+        linkUrl: faculty ? '/teach/enquiries' : '/admin/enquiries',
       });
     });
   }

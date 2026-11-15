@@ -249,4 +249,20 @@ describe('Activity notifications and multi-batch tests (e2e)', () => {
       link_url: '/teach/enquiries',
     });
   });
+
+  it('links an admin without the Faculty role to the admin portal instead', async () => {
+    const office = await createUser(ctx, ['ADMIN']);
+    const enquiry = await ctx.prisma.admission_enquiries.create({
+      data: { student_name: 'Sana', mobile: '+919876500001' },
+    });
+    await http()
+      .patch(api(`/admission-enquiries/${enquiry.id}`))
+      .set(bearer(t.admin))
+      .send({ assignedTo: office.id })
+      .expect(200);
+    expect((await notes(office.token))[0]).toMatchObject({
+      title: 'Enquiry assigned: Sana',
+      link_url: '/admin/enquiries',
+    });
+  });
 });
