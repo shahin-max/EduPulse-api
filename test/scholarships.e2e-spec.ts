@@ -298,6 +298,46 @@ describe('Scholarship Tests: registration, online test, awards, fees (e2e)', () 
     });
   });
 
+  it('keeps the candidates batch and test out of regular lists and reports', async () => {
+    const test = await ctx.prisma.scholarship_tests.findUniqueOrThrow({
+      where: { id: BigInt(ids.test) },
+      select: { batch_id: true, batches: { select: { code: true, course_id: true } } },
+    });
+    const listed = await http()
+      .get(api('/batches'))
+      .set(bearer(t.admin))
+      .expect(200);
+    expect(listed.body.data.map((b: { id: number }) => b.id)).not.toContain(
+      Number(test.batch_id),
+    );
+    // Still there when the Scholarship Tests course is picked.
+    const picked = await http()
+      .get(api(`/batches?courseId=${test.batches.course_id}`))
+      .set(bearer(t.admin))
+      .expect(200);
+    expect(picked.body.data.map((b: { id: number }) => b.id)).toContain(
+      Number(test.batch_id),
+    );
+    const summary = await http()
+      .get(api('/reports/admin-summary'))
+      .set(bearer(t.admin))
+      .expect(200);
+    expect(JSON.stringify(summary.body)).not.toContain(test.batches.code);
+    for (const path of ['/exam-attempts/me', '/exams/available', '/student/performance'])
+      expect(
+        (await http().get(api(path)).set(bearer(t.amy)).expect(200)).body,
+      ).toEqual([]);
+    // The attempt is still found by exam id (the scholarship page and attempt screen).
+    expect(
+      (
+        await http()
+          .get(api(`/exam-attempts/me?examId=${ids.exam}`))
+          .set(bearer(t.amy))
+          .expect(200)
+      ).body,
+    ).toHaveLength(1);
+  });
+
   it('applies the award once to a fee invoice, and releases it when the invoice is voided', async () => {
     const enrollment = await enrol(ctx, ids.amyId, ids.regularBatch);
     const available = await http()

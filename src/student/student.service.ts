@@ -263,6 +263,8 @@ export class StudentService {
       where: {
         student_user_id: user.id,
         status: { in: ['ACTIVE', 'PAUSED', 'COMPLETED'] },
+        // The Scholarship Test is an entrance test, not coursework.
+        batches: { scholarship_tests: { is: null } },
       },
       select: { id: true },
     });

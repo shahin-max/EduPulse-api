@@ -79,6 +79,11 @@ export class BatchesService {
     const where: Prisma.batchesWhereInput = {
       ...visibility,
       ...idFilter,
+      // Scholarship Test candidate batches are managed under Scholarship tests; they show here
+      // only when that course is picked.
+      ...(query.courseId === undefined
+        ? { scholarship_tests: { is: null } }
+        : {}),
       branch_id:
         query.branchId === undefined ? undefined : BigInt(query.branchId),
       course_id:

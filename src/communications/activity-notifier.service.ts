@@ -107,6 +107,83 @@ export class ActivityNotifier {
     });
   }
 
+  /**
+   * A student handed in an assignment for the first time: the batch's teachers for its subject
+   * (all of the batch's teachers when it has no subject) and whoever set it.
+   */
+  submissionReceived(submissionId: bigint) {
+    return this.safe('submission', async () => {
+      const s = await this.prisma.assignment_submissions.findUnique({
+        where: { id: submissionId },
+        select: {
+          submitted_at: true,
+          assignments: {
+            select: {
+              id: true,
+              title: true,
+              batch_id: true,
+              subject_id: true,
+              created_by: true,
+              due_at: true,
+            },
+          },
+          enrollments: {
+            select: { student_profiles: { select: { users: { select: { full_name: true } } } } },
+          },
+        },
+      });
+      if (!s) return;
+      const a = s.assignments;
+      const teachers = await this.prisma.batch_faculty.findMany({
+        where: {
+          batch_id: a.batch_id,
+          ...(a.subject_id ? { subject_id: a.subject_id } : {}),
+          faculty_profiles: { users: { status: 'ACTIVE', deleted_at: null } },
+        },
+        select: { faculty_user_id: true },
+      });
+      const ids = new Set(teachers.map((t) => t.faculty_user_id));
+      if (a.created_by) ids.add(a.created_by);
+      const late = a.due_at && s.submitted_at > a.due_at ? ' (late)' : '';
+      await this.notifications.notify([...ids], {
+        title: `Work handed in: ${a.title}`,
+        message: `${s.enrollments.student_profiles.users.full_name} handed in${late}. Ready to review.`,
+        linkUrl: `/teach/assignments/${a.id}`,
+      });
+    });
+  }
+
+  /** A new enquiry from the website form: every active admin. */
+  enquiryReceived(enquiryId: bigint) {
+    return this.safe('new enquiry', async () => {
+      const e = await this.prisma.admission_enquiries.findUnique({
+        where: { id: enquiryId },
+        select: {
+          student_name: true,
+          mobile: true,
+          courses: { select: { title: true } },
+        },
+      });
+      if (!e) return;
+      const admins = await this.prisma.users.findMany({
+        where: {
+          status: 'ACTIVE',
+          deleted_at: null,
+          user_roles: { some: { roles: { code: 'ADMIN' } } },
+        },
+        select: { id: true },
+      });
+      await this.notifications.notify(
+        admins.map((u) => u.id),
+        {
+          title: `New enquiry: ${e.student_name}`,
+          message: `${e.mobile}${e.courses ? ` · interested in ${e.courses.title}` : ''}. Call them back.`,
+          linkUrl: '/admin/enquiries',
+        },
+      );
+    });
+  }
+
   /** A published test, for all its batches or only the ones given (a batch attached later). */
   examPublished(examId: bigint, batchIds?: bigint[]) {
     return this.safe('exam', async () => {

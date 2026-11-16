@@ -108,6 +108,20 @@ describe('Activity notifications and multi-batch tests (e2e)', () => {
       .set(bearer(t.student))
       .send({ responseText: 'Done' })
       .expect(200);
+    // Editing before review does not notify the teacher again.
+    await http()
+      .put(api(`/assignments/${draft.body.id}/submission`))
+      .set(bearer(t.student))
+      .send({ responseText: 'Done, with working' })
+      .expect(200);
+    expect(
+      (await notes(t.faculty)).filter((n) => n.title.startsWith('Work handed in')),
+    ).toEqual([
+      expect.objectContaining({
+        title: 'Work handed in: Worksheet 3',
+        link_url: `/teach/assignments/${draft.body.id}`,
+      }),
+    ]);
     await http()
       .patch(api(`/assignment-submissions/${sub.body.id}/review`))
       .set(bearer(t.faculty))
@@ -248,6 +262,20 @@ describe('Activity notifications and multi-batch tests (e2e)', () => {
       title: 'Enquiry assigned: Rahul',
       link_url: '/teach/enquiries',
     });
+  });
+
+  it('tells every admin about a new enquiry from the website form', async () => {
+    await http()
+      .post(api('/admission-enquiries'))
+      .send({ studentName: 'Imran', mobile: '+91 98765 00002' })
+      .expect(201);
+    expect((await notes(t.admin))[0]).toMatchObject({
+      title: 'New enquiry: Imran',
+      link_url: '/admin/enquiries',
+    });
+    expect(
+      (await notes(t.faculty)).some((n) => n.title === 'New enquiry: Imran'),
+    ).toBe(false);
   });
 
   it('links an admin without the Faculty role to the admin portal instead', async () => {

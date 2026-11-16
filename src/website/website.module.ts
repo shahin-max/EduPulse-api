@@ -183,6 +183,7 @@ export class EnquiriesService {
         source: dto.source ?? 'WEBSITE',
       },
     });
+    await this.notifier.enquiryReceived(enquiry.id);
     // Visitors only get a receipt; staff read the full record.
     return {
       id: enquiry.id,

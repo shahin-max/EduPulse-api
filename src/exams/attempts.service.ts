@@ -41,6 +41,8 @@ export class AttemptsService {
     const exams = await this.prisma.exams.findMany({
       where: {
         status: 'PUBLISHED',
+        // Scholarship Tests are taken from /student/scholarships.
+        scholarship_tests: { is: null },
         exam_batches: {
           some: { batch_id: { in: enrollments.map((e) => e.batch_id) } },
         },
@@ -178,7 +180,10 @@ export class AttemptsService {
     const attempts = await this.prisma.exam_attempts.findMany({
       where: {
         enrollments: { student_user_id: user.id },
-        exam_id: examId === undefined ? undefined : BigInt(examId),
+        // The full list (Results page) leaves out Scholarship Tests; they have their own page.
+        ...(examId === undefined
+          ? { exams: { scholarship_tests: { is: null } } }
+          : { exam_id: BigInt(examId) }),
       },
       include: { exams: true },
       orderBy: { id: 'desc' },

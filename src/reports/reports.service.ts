@@ -585,7 +585,7 @@ export class ReportsService {
       where: {
         ...(batchIds === 'all' ? {} : { batch_id: { in: batchIds } }),
         ...currentEnrollmentWhere(),
-        batches: { status: 'ACTIVE' },
+        batches: { status: 'ACTIVE', scholarship_tests: { is: null } },
       },
       select: {
         id: true,
@@ -666,7 +666,12 @@ export class ReportsService {
           select: { amount: true, refunded_at: true, created_at: true },
         }),
         this.prisma.enrollments.findMany({
-          where: { enrolled_at: { gte: from }, status: { not: 'CANCELLED' } },
+          where: {
+            enrolled_at: { gte: from },
+            status: { not: 'CANCELLED' },
+            // Scholarship Test candidates are not admissions.
+            batches: { scholarship_tests: { is: null } },
+          },
           select: { enrolled_at: true },
         }),
         this.prisma.admission_enquiries.findMany({
@@ -674,7 +679,7 @@ export class ReportsService {
           select: { created_at: true, status: true },
         }),
         this.prisma.batches.findMany({
-          where: { status: 'ACTIVE' },
+          where: { status: 'ACTIVE', scholarship_tests: { is: null } },
           select: { id: true, code: true, name: true },
           orderBy: { name: 'asc' },
         }),

@@ -287,6 +287,8 @@ export class AssignmentsService {
           },
           include: submissionInclude,
         });
+    // Only the first hand-in tells the teachers; later edits before review don't.
+    if (!existing) await this.notifier.submissionReceived(saved.id);
     return present(saved, assignment.due_at);
   }
 
