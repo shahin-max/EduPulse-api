@@ -145,6 +145,15 @@ export class CreateInvoiceDto {
   @IsOptional()
   @IsBoolean()
   issue?: boolean;
+
+  /**
+   * A Scholarship Test award of this student (GET /students/:userId/scholarships): its % off the gross
+   * amount is added to the discount, and the award is used up (released again if the invoice is voided).
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  scholarshipAwardId?: number;
 }
 
 /** Only DRAFT invoices can be edited. */

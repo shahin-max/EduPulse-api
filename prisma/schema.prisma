@@ -215,6 +215,7 @@ model batches {
   exam_batches   exam_batches[]
   fee_plans      fee_plans[]
 
+  scholarship_tests scholarship_tests?
   @@unique([id, branch_id], map: "uq_batch_branch")
   @@index([branch_id, status], map: "idx_batches_branch")
   @@index([course_id, status], map: "idx_batches_course")
@@ -508,6 +509,7 @@ model exams {
   users                    users?                       @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_exam_creator")
   subjects                 subjects?                    @relation(fields: [subject_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_exam_subject")
 
+  scholarship_tests        scholarship_tests?
   @@index([created_by], map: "fk_exam_creator")
   @@index([subject_id], map: "fk_exam_subject")
   @@index([course_id, status], map: "idx_exam_course")
@@ -547,6 +549,7 @@ model fee_invoices {
   fee_plans       fee_plans?          @relation(fields: [fee_plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_plan")
   payments        payments[]
 
+  scholarship_awards scholarship_awards[]
   @@unique([id, branch_id], map: "uq_invoice_branch")
   @@index([fee_plan_id], map: "fk_invoice_plan")
   @@index([enrollment_id, status], map: "idx_invoice_enrollment")
@@ -839,6 +842,8 @@ model users {
   website_content        website_content[]
   enquiry_notes          enquiry_notes[]
 
+  scholarship_tests      scholarship_tests[]
+  scholarship_awards     scholarship_awards[]
   @@index([created_at], map: "idx_users_created")
   @@index([status], map: "idx_users_status")
 }
@@ -1039,4 +1044,58 @@ model enquiry_notes {
 
   @@index([enquiry_id, created_at], map: "idx_enquiry_notes_enquiry")
   @@index([author_id], map: "fk_enquiry_notes_author")
+}
+
+enum scholarship_tests_status {
+  DRAFT
+  OPEN
+  RESULTS_PUBLISHED
+}
+
+/// A Scholarship Test: its own candidates batch and exam; `slabs` is [{ minPercentage, discountPercent }].
+model scholarship_tests {
+  id                     BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
+  title                  String                   @db.VarChar(200)
+  description            String?                  @db.Text
+  exam_id                BigInt                   @unique(map: "uq_scholarship_exam") @db.UnsignedBigInt
+  batch_id               BigInt                   @unique(map: "uq_scholarship_batch") @db.UnsignedBigInt
+  /// Comma-separated classes, e.g. "Class 5,Class 6"; null = any class.
+  eligible_grades        String?                  @db.VarChar(255)
+  slabs                  Json
+  registration_closes_at DateTime?
+  valid_until            DateTime?                @db.Date
+  status                 scholarship_tests_status @default(DRAFT)
+  results_published_at   DateTime?
+  created_by             BigInt?                  @db.UnsignedBigInt
+  created_at             DateTime                 @default(now())
+  updated_at             DateTime                 @default(now()) @updatedAt
+  exams                  exams                    @relation(fields: [exam_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_scholarship_exam")
+  batches                batches                  @relation(fields: [batch_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_scholarship_batch")
+  users                  users?                   @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_scholarship_creator")
+  scholarship_awards     scholarship_awards[]
+
+  @@index([status], map: "idx_scholarship_status")
+  @@index([created_by], map: "fk_scholarship_creator")
+}
+
+/// One candidate's result in a Scholarship Test and the % off course fees awarded (used once, by an invoice).
+model scholarship_awards {
+  id                  BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+  scholarship_test_id BigInt            @db.UnsignedBigInt
+  student_user_id     BigInt            @db.UnsignedBigInt
+  percentage          Decimal?          @db.Decimal(8, 2)
+  rank                Int?              @db.UnsignedInt
+  discount_percent    Decimal           @default(0.00) @db.Decimal(5, 2)
+  is_override         Boolean           @default(false)
+  note                String?           @db.VarChar(500)
+  used_invoice_id     BigInt?           @db.UnsignedBigInt
+  created_at          DateTime          @default(now())
+  updated_at          DateTime          @default(now()) @updatedAt
+  scholarship_tests   scholarship_tests @relation(fields: [scholarship_test_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_award_test")
+  users               users             @relation(fields: [student_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_award_student")
+  fee_invoices        fee_invoices?     @relation(fields: [used_invoice_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_award_invoice")
+
+  @@unique([scholarship_test_id, student_user_id], map: "uq_scholarship_award")
+  @@index([student_user_id], map: "fk_award_student")
+  @@index([used_invoice_id], map: "fk_award_invoice")
 }

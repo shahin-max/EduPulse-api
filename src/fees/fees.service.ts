@@ -185,6 +185,7 @@ export class FeesService {
         id: true,
         batch_id: true,
         branch_id: true,
+        student_user_id: true,
         batches: { select: { course_id: true } },
       },
     });
@@ -220,7 +221,22 @@ export class FeesService {
       throw new BadRequestException(
         'grossAmount is required when no fee plan is given',
       );
-    const discount = money(dto.discountAmount ?? 0);
+    let discount = money(dto.discountAmount ?? 0);
+    let scholarshipNote: string | null = null;
+    if (dto.scholarshipAwardId !== undefined) {
+      const award = await this.usableAward(
+        BigInt(dto.scholarshipAwardId),
+        enrollment.student_user_id,
+      );
+      // The scholarship's share of the gross amount, on top of any other discount given.
+      discount = discount.plus(
+        gross.mul(award.discount_percent).div(100).toDecimalPlaces(2),
+      );
+      scholarshipNote = `${award.scholarship_tests.title}: ${Number(award.discount_percent)}% scholarship`;
+      description = description
+        ? `${description} (${scholarshipNote})`
+        : scholarshipNote;
+    }
     assertDiscount(gross, discount);
 
     const now = new Date();
@@ -250,6 +266,17 @@ export class FeesService {
             : draftInvoiceNumber(created.id),
         },
       });
+      if (dto.scholarshipAwardId !== undefined) {
+        // Claimed inside the transaction, so two invoices can never use the same award.
+        const claimed = await tx.scholarship_awards.updateMany({
+          where: { id: BigInt(dto.scholarshipAwardId), used_invoice_id: null },
+          data: { used_invoice_id: created.id },
+        });
+        if (claimed.count !== 1)
+          throw new ConflictException(
+            'This scholarship has already been used on another invoice',
+          );
+      }
       return created.id;
     });
     if (dto.issue) await this.notifier.invoiceIssued(id);
@@ -537,6 +564,11 @@ export class FeesService {
         );
       }
       await tx.fee_invoices.update({ where: { id }, data: { status: 'VOID' } });
+      // A scholarship used by this invoice can be applied to a new one.
+      await tx.scholarship_awards.updateMany({
+        where: { used_invoice_id: id },
+        data: { used_invoice_id: null },
+      });
     });
     return this.loadInvoice(id);
   }
@@ -888,6 +920,40 @@ export class FeesService {
     });
     if (!payment) throw new NotFoundException('Payment not found');
     return payment;
+  }
+
+  /** A published, unused, unexpired scholarship award of this student with a discount above 0. */
+  private async usableAward(id: bigint, studentUserId: bigint) {
+    const award = await this.prisma.scholarship_awards.findUnique({
+      where: { id },
+      select: {
+        student_user_id: true,
+        discount_percent: true,
+        used_invoice_id: true,
+        scholarship_tests: {
+          select: { title: true, status: true, valid_until: true },
+        },
+      },
+    });
+    if (!award || award.student_user_id !== studentUserId)
+      throw new BadRequestException(
+        'scholarshipAwardId is not a scholarship of this student',
+      );
+    if (
+      award.scholarship_tests.status !== 'RESULTS_PUBLISHED' ||
+      !award.discount_percent.gt(0)
+    )
+      throw new BadRequestException('This scholarship has not been awarded');
+    if (award.used_invoice_id)
+      throw new ConflictException(
+        'This scholarship has already been used on another invoice',
+      );
+    if (
+      award.scholarship_tests.valid_until &&
+      award.scholarship_tests.valid_until < startOfToday()
+    )
+      throw new BadRequestException('This scholarship has expired');
+    return award;
   }
 }
 

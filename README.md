@@ -133,6 +133,28 @@ suspension and role changes take effect immediately (not when the 15-minute acce
   They need Cloudinary (503 without it).
 - The e2e suites blank the Cloudinary keys, so tests never upload to a real account.
 
+## Scholarship Tests
+
+The whole flow reuses the batch and exam engine (migration `5_scholarships`):
+
+1. **Set up (admin):** `POST /scholarship-tests` with title, eligible classes, score slabs
+   (`[{ minPercentage, discountPercent }]`), the online window and duration, registration deadline and how long
+   awards stay valid. It creates a candidates batch and a draft exam in the hidden, draft "Scholarship Tests"
+   course (created on first use with every subject attached), so the paper is built with the normal question bank
+   and exam builder (pictures, maths, OMR included).
+2. **Open:** `POST /scholarship-tests/:id/open` (needs questions) publishes the exam and opens registration.
+   `GET /scholarship-tests/current` (public) returns `{ test }` for the website button.
+3. **Register:** a student (signing up on the website first if needed) calls `POST /scholarship-tests/:id/join`
+   with their class; they are enrolled in the candidates batch only (hidden from their course lists) and an
+   enquiry with source `SCHOLARSHIP_TEST` is created for the office.
+4. **Take the test** in the student portal within the window (`GET /student/scholarships`), one attempt.
+5. **Results (admin):** `GET /scholarship-tests/:id/results` ranks candidates by their best graded attempt and
+   suggests the slab; `PUT /scholarship-tests/:id/awards/:studentUserId` overrides (null resets to the slab);
+   `POST /scholarship-tests/:id/publish` stores the awards, releases the scores and notifies candidates.
+6. **Admission:** `GET /students/:userId/scholarships` lists usable awards; `POST /fee-invoices` with
+   `scholarshipAwardId` adds the % off the gross amount to the discount and uses the award up (voiding the invoice
+   releases it).
+
 ## Pictures in test questions
 
 Questions and options may carry a picture (`imageAssetId` on create/update, `image_asset_id` in responses): upload

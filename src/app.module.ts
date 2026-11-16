@@ -24,6 +24,7 @@ import { FeesModule } from './fees/fees.module.js';
 import { CommunicationsModule } from './communications/communications.module.js';
 import { ReportsModule } from './reports/reports.module.js';
 import { StudentModule } from './student/student.module.js';
+import { ScholarshipsModule } from './scholarships/scholarships.module.js';
 import { HealthController } from './health/health.controller.js';
 
 @Module({
@@ -55,6 +56,7 @@ import { HealthController } from './health/health.controller.js';
     CommunicationsModule,
     ReportsModule,
     StudentModule,
+    ScholarshipsModule,
     AuditModule,
   ],
   controllers: [HealthController],

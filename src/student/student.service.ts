@@ -22,7 +22,12 @@ export class StudentService {
 
   private currentEnrollments(userId: bigint) {
     return this.prisma.enrollments.findMany({
-      where: { student_user_id: userId, ...currentEnrollmentWhere() },
+      where: {
+        student_user_id: userId,
+        ...currentEnrollmentWhere(),
+        // Scholarship Test candidates batches hold only the test (see /student/scholarships).
+        batches: { scholarship_tests: { is: null } },
+      },
       orderBy: { enrolled_at: 'desc' },
       select: {
         id: true,
