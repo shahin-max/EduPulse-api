@@ -65,9 +65,16 @@ describe('LearningAccessService.canReadFile', () => {
       material?: boolean;
       assignment?: boolean;
       submission?: boolean;
+      question?: boolean;
     } = {},
   ) {
     const prisma = {
+      // Question pictures, readable once the student has an attempt at an exam using them.
+      questions: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue(found.question ? { id: 1n } : null),
+      },
       study_materials: {
         findFirst: vi
           .fn()

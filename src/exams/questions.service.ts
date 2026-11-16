@@ -17,6 +17,13 @@ import {
   UpdateQuestionDto,
 } from './dto/exams.dto.js';
 
+const IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+
 export const questionInclude = {
   question_options: {
     orderBy: [{ sort_order: 'asc' }, { option_label: 'asc' }],
@@ -31,8 +38,12 @@ export const questionInclude = {
   chapters: { select: { id: true, title: true } },
 } satisfies Prisma.questionsInclude;
 
-/** SINGLE_CHOICE rules: unique labels and exactly one correct option. */
+/** SINGLE_CHOICE rules: unique labels, text or a picture on every option, exactly one correct. */
 export function assertOptions(options: QuestionOptionDto[]): void {
+  if (options.some((o) => !o.optionText?.trim() && !o.imageAssetId))
+    throw new BadRequestException(
+      'every option needs text, a picture, or both',
+    );
   const labels = new Set(options.map((o) => o.optionLabel));
   if (labels.size !== options.length)
     throw new BadRequestException('option labels must be unique');
@@ -46,7 +57,8 @@ export function assertOptions(options: QuestionOptionDto[]): void {
 function optionRows(options: QuestionOptionDto[]) {
   return options.map((o, index) => ({
     option_label: o.optionLabel,
-    option_text: o.optionText,
+    option_text: o.optionText?.trim() ?? '',
+    image_asset_id: o.imageAssetId ? BigInt(o.imageAssetId) : null,
     is_correct: o.isCorrect,
     sort_order: o.sortOrder ?? index,
   }));
@@ -105,6 +117,10 @@ export class QuestionsService {
 
   async create(dto: CreateQuestionDto, actor: AuthUser) {
     assertOptions(dto.options);
+    await this.assertImages([
+      dto.imageAssetId,
+      ...dto.options.map((o) => o.imageAssetId),
+    ]);
     const courseSubjectId = await this.resolveCourseSubject(dto);
     const chapterId = await this.resolveChapter(courseSubjectId, dto.chapterId);
     return this.prisma.questions.create({
@@ -112,6 +128,7 @@ export class QuestionsService {
         course_subject_id: courseSubjectId,
         chapter_id: chapterId,
         question_text: dto.questionText,
+        image_asset_id: dto.imageAssetId ? BigInt(dto.imageAssetId) : null,
         explanation: dto.explanation,
         difficulty: dto.difficulty,
         marks_default:
@@ -128,6 +145,10 @@ export class QuestionsService {
 
   async update(id: bigint, dto: UpdateQuestionDto, actor: AuthUser) {
     const question = await this.findEditable(id, actor);
+    await this.assertImages([
+      dto.imageAssetId,
+      ...(dto.options ?? []).map((o) => o.imageAssetId),
+    ]);
     if (dto.options) {
       assertOptions(dto.options);
       const used = await this.prisma.attempt_answers.count({
@@ -155,6 +176,12 @@ export class QuestionsService {
         data: {
           chapter_id: chapterId,
           question_text: dto.questionText,
+          image_asset_id:
+            dto.imageAssetId === undefined
+              ? undefined
+              : dto.imageAssetId === null
+                ? null
+                : BigInt(dto.imageAssetId),
           explanation: dto.explanation,
           difficulty: dto.difficulty,
           marks_default:
@@ -242,5 +269,25 @@ export class QuestionsService {
       );
     }
     return BigInt(chapterId);
+  }
+
+  /** Question and option pictures must be existing image files (PNG, JPEG, GIF or WebP). */
+  private async assertImages(
+    ids: (number | null | undefined)[],
+  ): Promise<void> {
+    const wanted = [...new Set(ids.filter((id): id is number => !!id))];
+    if (!wanted.length) return;
+    const found = await this.prisma.file_assets.findMany({
+      where: { id: { in: wanted.map((id) => BigInt(id)) } },
+      select: { id: true, mime_type: true },
+    });
+    for (const id of wanted) {
+      const file = found.find((f) => f.id === BigInt(id));
+      if (!file) throw new BadRequestException(`Image file ${id} not found`);
+      if (!IMAGE_TYPES.has(file.mime_type))
+        throw new BadRequestException(
+          'Question pictures must be PNG, JPEG, GIF or WebP images',
+        );
+    }
   }
 }

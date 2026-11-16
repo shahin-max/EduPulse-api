@@ -392,6 +392,7 @@ export class AttemptsService {
                 questions: {
                   select: {
                     question_text: true,
+                    image_asset_id: true,
                     explanation: true,
                     question_options: {
                       orderBy: [{ sort_order: 'asc' }, { option_label: 'asc' }],
@@ -399,6 +400,7 @@ export class AttemptsService {
                         id: true,
                         option_label: true,
                         option_text: true,
+                        image_asset_id: true,
                         is_correct: true,
                       },
                     },
@@ -426,12 +428,15 @@ export class AttemptsService {
         question_id: a.question_id,
         display_order: a.display_order,
         question_text: a.exam_questions.questions.question_text,
+        // Pictures are private files: GET /files/:id/content works for the attempt's student.
+        image_asset_id: a.exam_questions.questions.image_asset_id,
         marks: a.exam_questions.marks,
         negative_marks: a.exam_questions.negative_marks,
         options: a.exam_questions.questions.question_options.map((o) => ({
           id: o.id,
           option_label: o.option_label,
           option_text: o.option_text,
+          image_asset_id: o.image_asset_id,
           ...(showReview ? { is_correct: o.is_correct } : {}),
         })),
         selected_option_id: a.selected_option_id,

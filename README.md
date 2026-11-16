@@ -133,6 +133,15 @@ suspension and role changes take effect immediately (not when the 15-minute acce
   They need Cloudinary (503 without it).
 - The e2e suites blank the Cloudinary keys, so tests never upload to a real account.
 
+## Pictures in test questions
+
+Questions and options may carry a picture (`imageAssetId` on create/update, `image_asset_id` in responses): upload
+the image first with `POST /files` (PNG, JPEG, GIF or WebP). An option needs text, a picture or both, so
+non-verbal reasoning options can be pictures only. Pictures are private: a student can open them
+(`GET /files/:id/content`) only once they have an attempt at an exam that uses the question, so a paper's figures
+can't be seen before the test starts. Maths in question text is written between `$` signs and rendered by the
+website (KaTeX).
+
 ## Teaching reports
 
 For admins and the faculty assigned to the batch:

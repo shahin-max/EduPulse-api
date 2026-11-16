@@ -44,9 +44,17 @@ export class QuestionOptionDto {
   })
   optionLabel: string;
 
+  /** May be empty when the option is a picture (imageAssetId). */
+  @IsOptional()
   @IsString()
-  @Length(1, 10000)
-  optionText: string;
+  @MaxLength(10000)
+  optionText?: string;
+
+  /** An uploaded image file (PNG, JPEG, GIF or WebP) shown as or with the option. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  imageAssetId?: number | null;
 
   @IsBoolean()
   isCorrect: boolean;
@@ -82,6 +90,12 @@ export class CreateQuestionDto {
   @IsString()
   @Length(1, 20000)
   questionText: string;
+
+  /** An uploaded image file (figure, diagram) shown with the question. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  imageAssetId?: number | null;
 
   @IsOptional()
   @IsString()
@@ -122,6 +136,12 @@ export class UpdateQuestionDto {
   @IsString()
   @Length(1, 20000)
   questionText?: string;
+
+  /** Replace (or with null remove) the question's picture. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  imageAssetId?: number | null;
 
   @IsOptional()
   @IsString()

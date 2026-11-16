@@ -592,6 +592,8 @@ model file_assets {
   users                  users?                   @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_assets_uploader")
   study_materials        study_materials[]
   website_content        website_content[]
+  questions              questions[]
+  question_options       question_options[]
 
   @@unique([bucket, object_key], map: "uq_assets_object")
   @@index([uploaded_by], map: "fk_assets_uploader")
@@ -675,15 +677,19 @@ model payments {
 model question_options {
   id              BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
   question_id     BigInt            @db.UnsignedBigInt
+  /// May be empty when the option is a picture (image_asset_id).
   option_text     String            @db.Text
+  image_asset_id  BigInt?           @db.UnsignedBigInt
   option_label    String            @db.VarChar(8)
   is_correct      Boolean           @default(false)
   sort_order      Int               @default(0)
   attempt_answers attempt_answers[]
   questions       questions         @relation(fields: [question_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_option_question")
+  file_assets     file_assets?      @relation(fields: [image_asset_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_option_image")
 
   @@unique([id, question_id], map: "uq_option_question")
   @@unique([question_id, option_label], map: "uq_question_option_label")
+  @@index([image_asset_id], map: "fk_option_image")
   @@index([question_id, sort_order], map: "idx_options_question")
 }
 
@@ -693,6 +699,8 @@ model questions {
   course_subject_id BigInt               @db.UnsignedBigInt
   chapter_id        BigInt?              @db.UnsignedBigInt
   question_text     String               @db.Text
+  /// Optional picture (figure, diagram) shown with the question.
+  image_asset_id    BigInt?              @db.UnsignedBigInt
   explanation       String?              @db.Text
   difficulty        questions_difficulty @default(MEDIUM)
   kind              questions_kind       @default(SINGLE_CHOICE)
@@ -704,9 +712,11 @@ model questions {
   question_options  question_options[]
   chapters          chapters?            @relation(fields: [chapter_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_question_chapter")
   users             users?               @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_question_creator")
+  file_assets       file_assets?         @relation(fields: [image_asset_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_question_image")
   course_subjects   course_subjects      @relation(fields: [course_subject_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_question_cs")
 
   @@index([chapter_id], map: "fk_question_chapter")
+  @@index([image_asset_id], map: "fk_question_image")
   @@index([created_by], map: "fk_question_creator")
   @@index([course_subject_id, chapter_id], map: "idx_questions_course_subject")
 }

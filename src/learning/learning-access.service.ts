@@ -99,6 +99,28 @@ export class LearningAccessService {
     });
     if (viaAssignment) return true;
 
+    // Test pictures: only once the student has an attempt at an exam that uses the question, so a
+    // paper's figures can't be opened before the test starts.
+    const viaQuestion = await this.prisma.questions.findFirst({
+      where: {
+        OR: [
+          { image_asset_id: file.id },
+          { question_options: { some: { image_asset_id: file.id } } },
+        ],
+        exam_questions: {
+          some: {
+            exams: {
+              exam_attempts: {
+                some: { enrollments: { student_user_id: user.id } },
+              },
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    if (viaQuestion) return true;
+
     const viaOwnSubmission = await this.prisma.assignment_submissions.findFirst(
       {
         where: { asset_id: file.id, enrollments: { student_user_id: user.id } },
