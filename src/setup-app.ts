@@ -8,6 +8,14 @@ import { PrismaExceptionFilter } from './common/prisma-exception.filter.js';
 
 export const API_PREFIX = 'api/v1';
 
+/** Swagger at /docs: on in development, off in production unless API_DOCS=true. */
+export function apiDocsEnabled(config: ConfigService): boolean {
+  const flag = config.get<string>('API_DOCS')?.trim().toLowerCase();
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
+  return config.get<string>('NODE_ENV') !== 'production';
+}
+
 const DESCRIPTION = [
   'Phase 1 backend for EduPulse Academy, Aligarh, on the `edupulse_lms` schema.',
   'Log in with `POST /api/v1/auth/login`, then click **Authorize** and paste the `accessToken`.',
@@ -24,8 +32,9 @@ export function setupApp(app: INestApplication): INestApplication {
   // limits would be shared by all visitors and audit logs would record the proxy. Trust exactly the
   // configured number of proxy hops (default 1 in production) so req.ip is the visitor's address;
   // a client cannot spoof it because only the hop the proxy itself appends is trusted.
+  // An empty TRUST_PROXY= (as in .env.example) means "not set", not 0.
   const hops = Number(
-    config.get<string>('TRUST_PROXY') ??
+    config.get<string>('TRUST_PROXY')?.trim() ||
       (config.get<string>('NODE_ENV') === 'production' ? '1' : '0'),
   );
   if (Number.isInteger(hops) && hops > 0)
@@ -49,6 +58,9 @@ export function setupApp(app: INestApplication): INestApplication {
   app.useGlobalFilters(new PrismaExceptionFilter());
   app.enableShutdownHooks();
 
+  // The API reference is for developers. In production it is off unless API_DOCS=true, so the
+  // live server does not publish a map of every route.
+  if (!apiDocsEnabled(config)) return app;
   const document = SwaggerModule.createDocument(
     app,
     new DocumentBuilder()

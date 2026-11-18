@@ -36,5 +36,8 @@ export function loadTestEnv(): Record<string, string> {
     'CLOUDINARY_API_SECRET',
   ])
     env[key] = '';
+  // A developer's .env may close the portals for a staged launch; the suites expect them open
+  // (the staged-launch suite switches it on itself).
+  env.PORTALS_OPEN ??= 'all';
   return env;
 }

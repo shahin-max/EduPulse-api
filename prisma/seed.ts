@@ -65,6 +65,14 @@ async function main() {
       );
       return;
     }
+    if (
+      process.env.NODE_ENV === 'production' &&
+      (password.length < 12 || /changeme/i.test(password))
+    ) {
+      throw new Error(
+        'SEED_ADMIN_PASSWORD is too weak for production: use 12+ characters, not the example value',
+      );
+    }
     if (await prisma.users.findUnique({ where: { email } })) {
       console.log(`Admin ${email} already exists; left unchanged`);
       return;

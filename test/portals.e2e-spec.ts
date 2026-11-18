@@ -1,3 +1,10 @@
+// Before the app module (and its ConfigModule) is imported, which happens at import time.
+const before = vi.hoisted(() => {
+  const value = process.env.PORTALS_OPEN;
+  process.env.PORTALS_OPEN = 'admin';
+  return value;
+});
+
 import {
   api,
   bearer,
@@ -10,10 +17,8 @@ import {
 describe('Staged launch: PORTALS_OPEN=admin (e2e)', () => {
   let ctx: TestContext;
   const t: Record<string, string> = {};
-  const before = process.env.PORTALS_OPEN;
 
   beforeAll(async () => {
-    process.env.PORTALS_OPEN = 'admin';
     ctx = await createTestApp();
     t.admin = (await createUser(ctx, ['ADMIN'])).token;
     t.adminTeacher = (await createUser(ctx, ['ADMIN', 'FACULTY'])).token;
@@ -50,6 +55,25 @@ describe('Staged launch: PORTALS_OPEN=admin (e2e)', () => {
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('PORTAL_CLOSED');
     }
+  });
+
+  it('treats faculty and students as visitors on public routes, so private files stay closed', async () => {
+    const admin = await ctx.http().get(api('/auth/me')).set(bearer(t.admin));
+    const file = await ctx.prisma.file_assets.create({
+      data: {
+        bucket: 'local',
+        object_key: '2026/11/portal-check.pdf',
+        original_filename: 'submission.pdf',
+        mime_type: 'application/pdf',
+        size_bytes: 10n,
+        visibility: 'PRIVATE',
+        uploaded_by: BigInt(admin.body.id),
+      },
+    });
+    const path = api(`/files/${file.id}`);
+    await ctx.http().get(path).set(bearer(t.admin)).expect(200);
+    await ctx.http().get(path).set(bearer(t.faculty)).expect(401);
+    await ctx.http().get(path).set(bearer(t.student)).expect(401);
   });
 
   it('keeps the public website open to signed-in faculty and students', async () => {

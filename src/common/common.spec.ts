@@ -1,3 +1,5 @@
+import type { ConfigService } from '@nestjs/config';
+import { apiDocsEnabled } from '../setup-app.js';
 import { ArgumentsHost, HttpStatus } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import { validateEnv } from '../config/env.validation.js';
@@ -114,5 +116,21 @@ describe('paginated', () => {
       total: 41,
       totalPages: 3,
     });
+  });
+});
+
+describe('apiDocsEnabled', () => {
+  const cfg = (env: Record<string, string | undefined>) =>
+    ({ get: (k: string) => env[k] }) as unknown as ConfigService;
+
+  it('serves /docs in development and hides it in production unless API_DOCS=true', () => {
+    expect(apiDocsEnabled(cfg({ NODE_ENV: 'development' }))).toBe(true);
+    expect(apiDocsEnabled(cfg({ NODE_ENV: 'production' }))).toBe(false);
+    expect(
+      apiDocsEnabled(cfg({ NODE_ENV: 'production', API_DOCS: 'true' })),
+    ).toBe(true);
+    expect(
+      apiDocsEnabled(cfg({ NODE_ENV: 'development', API_DOCS: 'false' })),
+    ).toBe(false);
   });
 });

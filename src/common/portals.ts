@@ -56,7 +56,13 @@ export class PortalsGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (open || isPublic) return true;
+    if (open) return true;
+    if (isPublic) {
+      // While their portal is closed, faculty and students use the website as visitors, so a
+      // public route (e.g. a file download) cannot hand them portal content.
+      delete context.switchToHttp().getRequest<AuthenticatedRequest>().user;
+      return true;
+    }
     throw new ForbiddenException({
       statusCode: 403,
       code: 'PORTAL_CLOSED',
