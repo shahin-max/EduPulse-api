@@ -35,6 +35,14 @@ export function validateEnv(
       `Set all of ${cloudinary.join(', ')} to use Cloudinary, or none of them`,
     );
   }
+  const portals = config.PORTALS_OPEN;
+  if (
+    portals !== undefined &&
+    (typeof portals !== 'string' ||
+      !['', 'all', 'admin'].includes(portals.trim().toLowerCase()))
+  ) {
+    throw new Error('PORTALS_OPEN must be "all" or "admin"');
+  }
   if (config.NODE_ENV === 'production') {
     for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']) {
       const value = String(config[key]);

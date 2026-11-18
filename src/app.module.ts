@@ -9,6 +9,7 @@ import { AccessModule } from './common/access.service.js';
 import { StorageModule } from './storage/cloudinary.service.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { RolesGuard } from './common/guards/roles.guard.js';
+import { PortalsController, PortalsGuard } from './common/portals.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -59,12 +60,13 @@ import { HealthController } from './health/health.controller.js';
     ScholarshipsModule,
     AuditModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, PortalsController],
   providers: [
-    // Order matters: rate limit, then authenticate, then check roles.
+    // Order matters: rate limit, then authenticate, then check roles, then the staged launch.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PortalsGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })

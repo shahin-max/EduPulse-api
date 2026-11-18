@@ -11,6 +11,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { AuthUser } from '../common/auth.js';
 import { CurrentUser, Public } from '../common/auth.js';
+import { OpenBeforeLaunch } from '../common/portals.js';
 import { AuthService } from './auth.service.js';
 import {
   ChangePasswordDto,
@@ -26,6 +27,7 @@ import {
 const AUTH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 
 @ApiTags('Auth')
+@OpenBeforeLaunch()
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
