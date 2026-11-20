@@ -1,5 +1,9 @@
 import { ActivityNotifier } from '../communications/activity-notifier.service.js';
 import {
+  WebsiteMediaController,
+  WebsiteMediaService,
+} from './website-media.js';
+import {
   BadRequestException,
   Body,
   Controller,
@@ -546,7 +550,12 @@ export class WebsiteContentController {
 }
 
 @Module({
-  controllers: [EnquiriesController, WebsiteContentController],
-  providers: [EnquiriesService, WebsiteContentService],
+  // The media controller is listed first so POST website-content/images is not read as a key.
+  controllers: [
+    EnquiriesController,
+    WebsiteMediaController,
+    WebsiteContentController,
+  ],
+  providers: [EnquiriesService, WebsiteContentService, WebsiteMediaService],
 })
 export class WebsiteModule {}

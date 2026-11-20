@@ -116,6 +116,26 @@ export class CloudinaryService {
   }
 
   /**
+   * Uploads a public website image (hero slides, update posters, gallery card). Large photos are
+   * scaled down to at most 1600 px wide and stored in an efficient format; never cropped.
+   */
+  uploadWebsiteImage(
+    buffer: Buffer,
+    publicId: string,
+  ): Promise<UploadApiResponse> {
+    return this.uploadBuffer(buffer, {
+      resource_type: 'image',
+      type: 'upload',
+      public_id: `${this.folder}/website/${publicId}`,
+      overwrite: false,
+      transformation: [
+        { width: 1600, crop: 'limit' },
+        { quality: 'auto', fetch_format: 'auto' },
+      ],
+    });
+  }
+
+  /**
    * A short-lived signed link to a private file, fetched by the API (never handed to the browser,
    * so the access check in FilesService stays the only way in).
    */
