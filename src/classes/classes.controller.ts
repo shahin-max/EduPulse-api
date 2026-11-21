@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../common/auth.js';
-import { CurrentUser, RoleCode, Roles } from '../common/auth.js';
+import { BRANCH_ADMIN, CurrentUser, RoleCode, Roles } from '../common/auth.js';
 import { ClassesService } from './classes.service.js';
 import {
   CreateClassSessionDto,
@@ -28,7 +28,7 @@ export class ClassSessionsController {
   constructor(private readonly classes: ClassesService) {}
 
   /** Schedule a class. Admins and faculty assigned to the batch. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Post()
   create(@Body() dto: CreateClassSessionDto, @CurrentUser() user: AuthUser) {
     return this.classes.create(dto, user);
@@ -58,7 +58,7 @@ export class ClassSessionsController {
   }
 
   /** Reschedule, change links (e.g. add the recording) or set status. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -68,14 +68,14 @@ export class ClassSessionsController {
     return this.classes.update(BigInt(id), dto, user);
   }
 
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Post(':id/cancel')
   cancel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.classes.cancel(BigInt(id), user);
   }
 
   /** Attendance sheet: every student of the batch with their mark (or null). */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Get(':id/attendance')
   attendance(
     @Param('id', ParseIntPipe) id: number,
@@ -85,7 +85,7 @@ export class ClassSessionsController {
   }
 
   /** Mark attendance for many students at once; re-marking overwrites. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Put(':id/attendance')
   markAttendance(
     @Param('id', ParseIntPipe) id: number,

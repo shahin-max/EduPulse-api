@@ -104,6 +104,7 @@ describe('JwtAuthGuard', () => {
       publicId: 'uuid-7',
       roles: ['FACULTY', 'ADMIN'],
       sessionId: 42n,
+      adminBranchIds: [],
     });
     expect(findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 42n } }),

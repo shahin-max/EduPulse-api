@@ -7,12 +7,19 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import type { announcements_audience } from '../generated/prisma/enums.js';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { jobsEnabled } from '../jobs/jobs-config.js';
 import {
   AccessService,
   currentEnrollmentWhere,
 } from '../common/access.service.js';
-import { AuthUser, isAdmin, RoleCode } from '../common/auth.js';
+import {
+  AuthUser,
+  isAdmin,
+  isBranchAdmin,
+  RoleCode,
+} from '../common/auth.js';
 import { paginated, skipTake } from '../common/pagination.js';
 import { NotificationsService } from './notifications.service.js';
 import {
@@ -29,7 +36,8 @@ import {
 } from './dto/communications.dto.js';
 
 const announcementInclude = {
-  batches: { select: { id: true, code: true, name: true } },
+  batches: { select: { id: true, code: true, name: true, branch_id: true } },
+  branches: { select: { id: true, code: true, name: true } },
   users: { select: { id: true, full_name: true } },
 } satisfies Prisma.announcementsInclude;
 
@@ -41,9 +49,8 @@ const LAZY_DISPATCH_EVERY_MS = 60 * 1000;
  * Announcements and their notification fan-out.
  *
  * Scheduled announcements (publish_at in the future) stay out of feeds until publish_at, and
- * notify their audience only once due. There is no job scheduler yet, so due announcements are
- * dispatched lazily: on publish, and at most once a minute when anyone reads their feed or
- * notifications. A dispatch is recorded by the notifications it creates (link_url
+ * notify their audience only once due: on publish, and from the every-minute job (or, with jobs
+ * off, at most once a minute when anyone reads their feed or notifications). A dispatch is recorded by the notifications it creates (link_url
  * "/announcements/:id"), which keeps it idempotent; dispatches are serialised in-process
  * (fine for a single API instance; use a job queue/lock if the API is scaled out).
  */
@@ -55,19 +62,22 @@ export class AnnouncementsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
     private readonly access: AccessService,
     private readonly notifications: NotificationsService,
   ) {}
 
   async create(dto: CreateAnnouncementDto, user: AuthUser) {
     const batchId = dto.batchId === undefined ? null : BigInt(dto.batchId);
-    await this.assertMayPost(user, dto.audience, batchId);
+    const branchId = dto.branchId === undefined ? null : BigInt(dto.branchId);
+    await this.assertMayPost(user, dto.audience, batchId, branchId);
     const announcement = await this.prisma.announcements.create({
       data: {
         title: dto.title,
         body: dto.body,
         audience: dto.audience,
         batch_id: batchId,
+        branch_id: branchId,
         publish_at: dto.publishAt ?? (dto.publish ? new Date() : null),
         status: dto.publish ? 'PUBLISHED' : 'DRAFT',
         created_by: user.id,
@@ -78,13 +88,27 @@ export class AnnouncementsService {
     return announcement;
   }
 
-  /** Management list: admins see all, faculty see the ones they wrote. */
+  /**
+   * Management list: head office sees all; branch admins their own and those for their branches
+   * and their batches; faculty the ones they wrote.
+   */
   async list(query: ListAnnouncementsQueryDto, user: AuthUser) {
+    const branches = user.adminBranchIds ?? [];
     const where: Prisma.announcementsWhereInput = {
       status: query.status,
       audience: query.audience,
       batch_id: query.batchId === undefined ? undefined : BigInt(query.batchId),
-      ...(isAdmin(user) ? {} : { created_by: user.id }),
+      ...(isAdmin(user)
+        ? {}
+        : isBranchAdmin(user)
+          ? {
+              OR: [
+                { created_by: user.id },
+                { branch_id: { in: branches } },
+                { batches: { branch_id: { in: branches } } },
+              ],
+            }
+          : { created_by: user.id }),
     };
     const [data, total] = await this.prisma.$transaction([
       this.prisma.announcements.findMany({
@@ -101,11 +125,21 @@ export class AnnouncementsService {
   /** Published, due announcements addressed to the user, newest first. */
   async feed(query: FeedQueryDto, user: AuthUser) {
     const batchIds = await this.access.visibleBatchIds(user);
+    const branchIds = await this.memberBranchIds(user, batchIds);
     const now = new Date();
     const where: Prisma.announcementsWhereInput = {
       status: 'PUBLISHED',
       OR: [{ publish_at: null }, { publish_at: { lte: now } }],
-      AND: [{ OR: audienceFilter(user.roles, batchIds) }],
+      AND: [
+        {
+          OR: audienceFilter(
+            user.roles,
+            batchIds,
+            branchIds,
+            isBranchAdmin(user),
+          ),
+        },
+      ],
       ...(query.batchId === undefined
         ? {}
         : { batch_id: BigInt(query.batchId) }),
@@ -129,9 +163,16 @@ export class AnnouncementsService {
     const due =
       announcement.status === 'PUBLISHED' &&
       (!announcement.publish_at || announcement.publish_at <= new Date());
+    const batchIds = await this.access.visibleBatchIds(user);
     if (
       due &&
-      canSee(announcement, user.roles, await this.access.visibleBatchIds(user))
+      canSee(
+        announcement,
+        user.roles,
+        batchIds,
+        await this.memberBranchIds(user, batchIds),
+        isBranchAdmin(user),
+      )
     )
       return announcement;
     throw new NotFoundException('Announcement not found');
@@ -148,8 +189,18 @@ export class AnnouncementsService {
         : dto.batchId === null
           ? null
           : BigInt(dto.batchId);
-    if (dto.audience !== undefined || dto.batchId !== undefined)
-      await this.assertMayPost(user, audience, batchId);
+    const branchId =
+      dto.branchId === undefined
+        ? announcement.branch_id
+        : dto.branchId === null
+          ? null
+          : BigInt(dto.branchId);
+    if (
+      dto.audience !== undefined ||
+      dto.batchId !== undefined ||
+      dto.branchId !== undefined
+    )
+      await this.assertMayPost(user, audience, batchId, branchId);
     const updated = await this.prisma.announcements.update({
       where: { id },
       data: {
@@ -157,6 +208,7 @@ export class AnnouncementsService {
         body: dto.body,
         audience,
         batch_id: batchId,
+        branch_id: branchId,
         publish_at: dto.publishAt,
       },
       include: announcementInclude,
@@ -173,6 +225,7 @@ export class AnnouncementsService {
       user,
       announcement.audience,
       announcement.batch_id,
+      announcement.branch_id,
     );
     const updated = await this.prisma.announcements.update({
       where: { id },
@@ -205,8 +258,13 @@ export class AnnouncementsService {
     await this.prisma.announcements.delete({ where: { id } });
   }
 
-  /** Called on feed/notification reads; dispatches due scheduled announcements at most once a minute. */
+  /**
+   * Fallback when background jobs are off (JOBS_ENABLED=false): called on feed/notification reads,
+   * dispatches due scheduled announcements at most once a minute. Otherwise the every-minute job
+   * does it (src/jobs/jobs.ts).
+   */
   async dispatchDueLazily(): Promise<void> {
+    if (jobsEnabled(this.config)) return;
     if (Date.now() - this.lastLazyDispatch < LAZY_DISPATCH_EVERY_MS) return;
     this.lastLazyDispatch = Date.now();
     try {
@@ -256,7 +314,11 @@ export class AnnouncementsService {
     if (already) return 0;
     // The author already knows; everyone else in the audience is notified.
     const recipients = (
-      await this.recipients(announcement.audience, announcement.batch_id)
+      await this.recipients(
+        announcement.audience,
+        announcement.batch_id,
+        announcement.branch_id,
+      )
     ).filter((userId) => userId !== announcement.created_by);
     const message =
       announcement.body.length > 500
@@ -266,13 +328,19 @@ export class AnnouncementsService {
       title: announcement.title,
       message,
       linkUrl: link,
+      email: true,
     });
   }
 
-  /** Active users in the audience. BATCH = actively enrolled students plus the batch's faculty. */
+  /**
+   * Active users in the audience. BATCH = actively enrolled students plus the batch's faculty.
+   * BRANCH = students currently enrolled at the branch, the faculty of its batches and its staff.
+   * ADMINS includes branch admins.
+   */
   async recipients(
     audience: announcements_audience,
     batchId: bigint | null,
+    branchId: bigint | null = null,
   ): Promise<bigint[]> {
     const active: Prisma.usersWhereInput = {
       status: 'ACTIVE',
@@ -294,7 +362,25 @@ export class AnnouncementsService {
           })
         ).map((u) => u.id);
       case 'ADMINS':
-        return byRole(RoleCode.ADMIN);
+        return (
+          await this.prisma.users.findMany({
+            where: {
+              ...active,
+              OR: [
+                { user_roles: { some: { roles: { code: RoleCode.ADMIN } } } },
+                {
+                  branch_staff: {
+                    some: {
+                      roles: { code: RoleCode.ADMIN },
+                      branches: { is_active: true },
+                    },
+                  },
+                },
+              ],
+            },
+            select: { id: true },
+          })
+        ).map((u) => u.id);
       case 'FACULTY':
         return byRole(RoleCode.FACULTY);
       case 'STUDENTS':
@@ -320,9 +406,31 @@ export class AnnouncementsService {
           ...faculty.map((f) => f.faculty_user_id),
         ];
       }
-      case 'BRANCH':
-        // Cannot be created yet (see batchRuleError), so there is nobody to notify.
-        return [];
+      case 'BRANCH': {
+        if (branchId === null) return [];
+        const users = await this.prisma.users.findMany({
+          where: {
+            ...active,
+            OR: [
+              {
+                student_profiles: {
+                  enrollments: {
+                    some: { branch_id: branchId, ...currentEnrollmentWhere() },
+                  },
+                },
+              },
+              {
+                faculty_profiles: {
+                  batch_faculty: { some: { batches: { branch_id: branchId } } },
+                },
+              },
+              { branch_staff: { some: { branch_id: branchId } } },
+            ],
+          },
+          select: { id: true },
+        });
+        return users.map((u) => u.id);
+      }
     }
   }
 
@@ -330,26 +438,74 @@ export class AnnouncementsService {
     user: AuthUser,
     audience: announcements_audience,
     batchId: bigint | null,
+    branchId: bigint | null = null,
   ): Promise<void> {
-    const rule = batchRuleError(audience, batchId);
+    const rule = batchRuleError(audience, batchId, branchId);
     if (rule) throw new BadRequestException(rule);
     if (batchId !== null) await this.access.assertBatchExists(batchId);
+    if (branchId !== null) {
+      const branch = await this.prisma.branches.findUnique({
+        where: { id: branchId },
+        select: { id: true },
+      });
+      if (!branch)
+        throw new BadRequestException('branchId does not match any branch');
+    }
     if (isAdmin(user)) return;
+    if (audience === 'BRANCH' && isBranchAdmin(user)) {
+      this.access.assertBranchAdmin(user, branchId);
+      return;
+    }
     if (audience !== 'BATCH')
       throw new ForbiddenException(
-        'Faculty can only post announcements to a batch',
+        isBranchAdmin(user)
+          ? 'Branch admins post to their branch or to one of its batches'
+          : 'Faculty can only post announcements to a batch',
       );
     await this.access.assertCanManageBatch(user, batchId!);
   }
 
+  /** Head office, the author, or an admin of the branch the announcement is for. */
   private mayManage(
-    announcement: { created_by: bigint | null },
+    announcement: {
+      created_by: bigint | null;
+      branch_id: bigint | null;
+      batches: { branch_id: bigint } | null;
+    },
     user: AuthUser,
   ): boolean {
-    return (
-      isAdmin(user) ||
-      (announcement.created_by !== null && announcement.created_by === user.id)
-    );
+    if (isAdmin(user)) return true;
+    if (announcement.created_by !== null && announcement.created_by === user.id)
+      return true;
+    const branchId =
+      announcement.branch_id ?? announcement.batches?.branch_id ?? null;
+    return isBranchAdmin(user) && this.access.isAdminOfBranch(user, branchId);
+  }
+
+  /**
+   * Branches whose BRANCH announcements the user reads: every branch for head office; otherwise
+   * the branches they work at and those of the batches they teach or study in.
+   */
+  private async memberBranchIds(
+    user: AuthUser,
+    batchIds: bigint[] | 'all',
+  ): Promise<bigint[] | 'all'> {
+    if (isAdmin(user)) return 'all';
+    const ids = new Set<bigint>(user.adminBranchIds ?? []);
+    for (const row of await this.prisma.branch_staff.findMany({
+      where: { user_id: user.id },
+      select: { branch_id: true },
+    }))
+      ids.add(row.branch_id);
+    if (batchIds !== 'all' && batchIds.length) {
+      for (const row of await this.prisma.batches.findMany({
+        where: { id: { in: batchIds } },
+        select: { branch_id: true },
+        distinct: ['branch_id'],
+      }))
+        ids.add(row.branch_id);
+    }
+    return [...ids];
   }
 
   private async get(id: bigint) {

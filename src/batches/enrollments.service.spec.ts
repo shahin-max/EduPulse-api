@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service.js';
+import type { AccessService } from '../common/access.service.js';
+import type { AuthUser } from '../common/auth.js';
 import { EnrollmentsService } from './enrollments.service.js';
 
 function setup(opts: {
@@ -39,21 +41,36 @@ function setup(opts: {
       update: vi.fn().mockResolvedValue({ id: 9n }),
     },
   };
+  const access = {
+    assertBatchExists: vi.fn().mockResolvedValue({ branch_id: 1n }),
+    assertBranchAdmin: vi.fn(),
+    assertCanManageUser: vi.fn(),
+  };
   const prisma = {
     $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   return {
     tx,
-    service: new EnrollmentsService(prisma as unknown as PrismaService),
+    service: new EnrollmentsService(
+      prisma as unknown as PrismaService,
+      access as unknown as AccessService,
+    ),
   };
 }
+
+const admin: AuthUser = {
+  id: 1n,
+  publicId: 'a',
+  roles: ['ADMIN'],
+  sessionId: 1n,
+};
 
 describe('EnrollmentsService.create', () => {
   const dto = { studentUserId: 3, batchId: 5 };
 
   it('locks the batch row before counting PENDING + ACTIVE seats', async () => {
     const { tx, service } = setup({});
-    await service.create(dto, 1n);
+    await service.create(dto, admin);
     expect(
       (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?'),
     ).toMatch(/FROM batches WHERE id = \? FOR UPDATE/);
@@ -73,19 +90,19 @@ describe('EnrollmentsService.create', () => {
       setup({
         batch: { capacity: 2, status: 'ACTIVE' },
         taken: 2,
-      }).service.create(dto, 1n),
+      }).service.create(dto, admin),
     ).rejects.toThrow(new ConflictException('This batch is full'));
     await expect(
       setup({
         batch: { capacity: null, status: 'ACTIVE' },
         taken: 999,
-      }).service.create(dto, 1n),
+      }).service.create(dto, admin),
     ).resolves.toBeTruthy();
   });
 
   it.each(['COMPLETED', 'CANCELLED'])('rejects a %s batch', async (status) => {
     await expect(
-      setup({ batch: { capacity: 30, status } }).service.create(dto, 1n),
+      setup({ batch: { capacity: 30, status } }).service.create(dto, admin),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -97,10 +114,10 @@ describe('EnrollmentsService.create', () => {
       student_profiles: null,
     };
     await expect(
-      setup({ student: faculty }).service.create(dto, 1n),
+      setup({ student: faculty }).service.create(dto, admin),
     ).rejects.toThrow(/active student/);
     await expect(
-      setup({ locked: false }).service.create(dto, 1n),
+      setup({ locked: false }).service.create(dto, admin),
     ).rejects.toThrow(/does not match any batch/);
   });
 
@@ -108,7 +125,7 @@ describe('EnrollmentsService.create', () => {
     const { tx, service } = setup({
       existing: { id: 9n, status: 'CANCELLED' },
     });
-    await service.create(dto, 1n);
+    await service.create(dto, admin);
     expect(tx.enrollments.create).not.toHaveBeenCalled();
     expect(tx.enrollments.update.mock.calls[0][0]).toMatchObject({
       where: { id: 9n },
@@ -120,7 +137,7 @@ describe('EnrollmentsService.create', () => {
     await expect(
       setup({ existing: { id: 9n, status: 'PENDING' } }).service.create(
         dto,
-        1n,
+        admin,
       ),
     ).rejects.toThrow(/already enrolled/);
     await expect(
@@ -130,7 +147,7 @@ describe('EnrollmentsService.create', () => {
           accessStartsAt: new Date('2027-02-01'),
           accessEndsAt: new Date('2027-01-01'),
         },
-        1n,
+        admin,
       ),
     ).rejects.toThrow(/accessEndsAt/);
   });

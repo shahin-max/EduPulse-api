@@ -39,5 +39,7 @@ export function loadTestEnv(): Record<string, string> {
   // A developer's .env may close the portals for a staged launch; the suites expect them open
   // (the staged-launch suite switches it on itself).
   env.PORTALS_OPEN ??= 'all';
+  // Background jobs would fire mid-test; the suites use the on-read fallback instead.
+  env.JOBS_ENABLED = 'false';
   return env;
 }

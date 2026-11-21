@@ -12,6 +12,8 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   AccessTokenPayload,
+  AuthUser,
+  isAdmin,
   RefreshTokenPayload,
   RoleCode,
 } from '../common/auth.js';
@@ -186,13 +188,25 @@ export class AuthService {
     await revokeAllSessions(this.prisma, userId);
   }
 
-  async me(userId: bigint) {
+  async me(userId: bigint, auth?: AuthUser) {
     const user = await this.prisma.users.findUnique({
       where: { id: userId },
       select: userDetailSelect,
     });
     if (!user) throw new NotFoundException('User not found');
-    return withRoles(user);
+    const branchIds = auth?.adminBranchIds ?? [];
+    const adminBranches = branchIds.length
+      ? await this.prisma.branches.findMany({
+          where: { id: { in: branchIds } },
+          select: { id: true, code: true, name: true },
+          orderBy: { name: 'asc' },
+        })
+      : [];
+    return {
+      ...withRoles(user),
+      is_head_office: isAdmin(auth),
+      admin_branches: adminBranches,
+    };
   }
 
   /** Changes the password and signs out every other device. */

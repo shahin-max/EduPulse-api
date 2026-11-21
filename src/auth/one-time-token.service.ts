@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { auth_tokens_purpose } from '../generated/prisma/enums.js';
 import { webUrl } from '../mail/mail.module.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SmsService } from '../sms/sms.service.js';
 
 export type TokenPurpose = auth_tokens_purpose;
 
@@ -30,6 +31,7 @@ export class OneTimeTokenService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly mailer: Mailer,
+    private readonly sms: SmsService,
   ) {}
 
   async issue(userId: bigint, purpose: TokenPurpose): Promise<string> {
@@ -76,10 +78,10 @@ export class OneTimeTokenService {
   }
 
   /**
-   * Hands a token to the user. Email addresses get a link by email (sent in the background, so a
-   * slow mail server never delays the request or reveals whether the account exists). No SMS
-   * provider is connected, so tokens for mobile numbers are only logged; admins can issue a
-   * password link instead. The token is also returned when EXPOSE_DEV_TOKENS=true outside production.
+   * Hands a token to the user: a link by email for email addresses, by SMS for mobile numbers
+   * (SMS_PROVIDER; without one it is only logged and admins can issue a password link instead).
+   * Sent in the background, so a slow provider never delays the request or reveals whether the
+   * account exists. The token is also returned when EXPOSE_DEV_TOKENS=true outside production.
    */
   deliver(
     purpose: TokenPurpose,
@@ -96,15 +98,41 @@ export class OneTimeTokenService {
             `[${purpose}] email to ${masked} failed: ${error instanceof Error ? error.message : String(error)}`,
           ),
         );
+    } else if (!destination.includes('@')) {
+      const link = this.link(purpose, token);
+      this.sms
+        .send({
+          kind: purpose === 'MOBILE_VERIFY' ? 'MOBILE_VERIFY' : 'PASSWORD_RESET',
+          to: destination,
+          link,
+          text:
+            purpose === 'MOBILE_VERIFY'
+              ? `EduPulse Academy: confirm your mobile number: ${link} (valid 24 hours)`
+              : `EduPulse Academy: choose a new password: ${link} (valid 1 hour, use once). Ignore this if you did not ask.`,
+        })
+        .then(() => {
+          if (this.sms.provider !== 'log')
+            this.logger.log(`[${purpose}] SMS sent to ${masked}`);
+        })
+        .catch((error: unknown) =>
+          this.logger.error(
+            `[${purpose}] SMS to ${masked} failed: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        );
     } else {
-      this.logger.log(
-        `[${purpose}] token issued for ${masked} (no SMS provider connected; not sent)`,
-      );
+      this.logger.log(`[${purpose}] token issued for ${masked} (not sent)`);
     }
     const expose =
       this.config.get<string>('EXPOSE_DEV_TOKENS') === 'true' &&
       this.config.get<string>('NODE_ENV') !== 'production';
     return expose ? { devToken: token } : {};
+  }
+
+  /** The website page that takes the token. Verification tokens of either kind use /verify-email. */
+  private link(purpose: TokenPurpose, token: string): string {
+    const query = `token=${encodeURIComponent(token)}`;
+    const page = purpose === 'PASSWORD_RESET' ? 'set-password' : 'verify-email';
+    return `${webUrl(this.config)}/${page}?${query}`;
   }
 
   private message(purpose: TokenPurpose, token: string) {

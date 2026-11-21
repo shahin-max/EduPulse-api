@@ -7,7 +7,8 @@ import {
 import { Prisma } from '../generated/prisma/client.js';
 import { enrollments_status } from '../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { RoleCode } from '../common/auth.js';
+import { AccessService, branchIn } from '../common/access.service.js';
+import { AuthUser, RoleCode } from '../common/auth.js';
 import { paginated, skipTake } from '../common/pagination.js';
 import { SEAT_STATUSES } from './batches.service.js';
 import {
@@ -43,13 +44,24 @@ const holdsSeat = (status: enrollments_status) =>
 
 @Injectable()
 export class EnrollmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: AccessService,
+  ) {}
 
-  /** Enrols a student. Re-opens a previous CANCELLED/COMPLETED enrollment in the same batch. */
-  async create(dto: CreateEnrollmentDto, actorId: bigint) {
+  /**
+   * Enrols a student. Re-opens a previous CANCELLED/COMPLETED enrollment in the same batch.
+   * Branch admins enrol into their branches' batches, students they can see (their branches'
+   * students and those not enrolled anywhere yet).
+   */
+  async create(dto: CreateEnrollmentDto, actor: AuthUser) {
+    const actorId = actor.id;
     const studentId = BigInt(dto.studentUserId);
     const batchId = BigInt(dto.batchId);
     assertAccessWindow(dto.accessStartsAt, dto.accessEndsAt);
+    const batch = await this.access.assertBatchExists(batchId);
+    this.access.assertBranchAdmin(actor, batch.branch_id);
+    await this.access.assertCanManageUser(actor, studentId);
     return this.prisma.$transaction(async (tx) => {
       const student = await tx.users.findUnique({
         where: { id: studentId },
@@ -114,8 +126,9 @@ export class EnrollmentsService {
     });
   }
 
-  async findAll(query: ListEnrollmentsQueryDto) {
+  async findAll(query: ListEnrollmentsQueryDto, user: AuthUser) {
     const where: Prisma.enrollmentsWhereInput = {
+      branch_id: branchIn(this.access.branchScope(user, query.branchId)),
       batch_id: query.batchId === undefined ? undefined : BigInt(query.batchId),
       student_user_id:
         query.studentUserId === undefined
@@ -144,10 +157,11 @@ export class EnrollmentsService {
     });
   }
 
-  update(id: bigint, dto: UpdateEnrollmentDto) {
+  update(id: bigint, dto: UpdateEnrollmentDto, user: AuthUser) {
     return this.prisma.$transaction(async (tx) => {
       const enrollment = await tx.enrollments.findUnique({ where: { id } });
       if (!enrollment) throw new NotFoundException('Enrollment not found');
+      this.access.assertBranchAdmin(user, enrollment.branch_id);
       assertAccessWindow(
         dto.accessStartsAt === undefined
           ? enrollment.access_starts_at

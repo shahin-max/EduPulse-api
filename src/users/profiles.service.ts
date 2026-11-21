@@ -4,7 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { AuthUser, isAdmin } from '../common/auth.js';
+import { AuthUser, isAdmin, isBranchAdmin } from '../common/auth.js';
+import { AccessService } from '../common/access.service.js';
 import {
   AdminFacultyProfileDto,
   AdminStudentProfileDto,
@@ -22,7 +23,10 @@ const publicFacultySelect = {
 
 @Injectable()
 export class ProfilesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: AccessService,
+  ) {}
 
   async getStudent(userId: bigint) {
     const profile = await this.prisma.student_profiles.findUnique({
@@ -43,9 +47,14 @@ export class ProfilesService {
     return profile;
   }
 
-  /** Faculty may only open the profiles of students in batches they teach. */
+  /**
+   * Faculty may only open the profiles of students in batches they teach; branch admins those of
+   * their branches' students (and students not enrolled yet).
+   */
   async getStudentFor(actor: AuthUser, userId: bigint) {
-    if (!isAdmin(actor)) {
+    if (isBranchAdmin(actor)) {
+      await this.access.assertCanManageUser(actor, userId);
+    } else if (!isAdmin(actor)) {
       const shared = await this.prisma.enrollments.findFirst({
         where: {
           student_user_id: userId,

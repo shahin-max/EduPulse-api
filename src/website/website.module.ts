@@ -21,7 +21,8 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiProduces, ApiTags } from '@nestjs/swagger';
+import { allPages, csvFile } from '../common/csv.js';
 import { Throttle } from '@nestjs/throttler';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -40,12 +41,16 @@ import { Prisma } from '../generated/prisma/client.js';
 import { admission_enquiries_status } from '../generated/prisma/enums.js';
 import type { AuthUser } from '../common/auth.js';
 import {
+  BRANCH_ADMIN,
   CurrentUser,
   isAdmin,
+  isAnyAdmin,
+  isBranchAdmin,
   Public,
   RoleCode,
   Roles,
 } from '../common/auth.js';
+import { AccessService, branchIn } from '../common/access.service.js';
 import {
   PaginationQueryDto,
   paginated,
@@ -89,6 +94,15 @@ export class CreateEnquiryDto {
   @Min(1)
   interestedCourseId?: number;
 
+  /**
+   * Preferred branch. Omitted: the only active branch, or head office routes it when there are
+   * several.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  branchId?: number;
+
   /** @example "Class 9, evening batch preferred" */
   @IsOptional()
   @Transform(trim)
@@ -112,11 +126,20 @@ export class UpdateEnquiryDto {
   @IsIn(Object.values(admission_enquiries_status))
   status?: admission_enquiries_status;
 
-  /** Admin or faculty user following up; null to unassign. */
+  /**
+   * Admin or faculty user following up; null to unassign. Branch admins assign staff of the
+   * enquiry's branch.
+   */
   @IsOptional()
   @IsInt()
   @Min(1)
   assignedTo?: number | null;
+
+  /** Route the enquiry to a branch (admins; a branch admin only to one of their branches). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  branchId?: number;
 }
 
 export class AddEnquiryNoteDto {
@@ -142,6 +165,18 @@ export class ListEnquiriesQueryDto extends PaginationQueryDto {
   @IsInt()
   assignedTo?: number;
 
+  /** Only this branch (branch admins: one of theirs; by default all of them). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  branchId?: number;
+
+  /** Head office: only enquiries not routed to a branch yet. */
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  unrouted?: boolean;
+
   /** Matches name or mobile. */
   @IsOptional()
   @Transform(trim)
@@ -153,6 +188,7 @@ export class ListEnquiriesQueryDto extends PaginationQueryDto {
 const enquiryInclude = {
   courses: { select: { id: true, code: true, title: true } },
   users: { select: { id: true, full_name: true } },
+  branches: { select: { id: true, code: true, name: true } },
   _count: { select: { enquiry_notes: true } },
 } satisfies Prisma.admission_enquiriesInclude;
 
@@ -161,9 +197,11 @@ export class EnquiriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifier: ActivityNotifier,
+    private readonly access: AccessService,
   ) {}
 
   async create(dto: CreateEnquiryDto) {
+    const branchId = await this.enquiryBranch(dto.branchId);
     if (dto.interestedCourseId !== undefined) {
       const course = await this.prisma.courses.findUnique({
         where: { id: BigInt(dto.interestedCourseId) },
@@ -185,6 +223,7 @@ export class EnquiriesService {
             : BigInt(dto.interestedCourseId),
         message: dto.message,
         source: dto.source ?? 'WEBSITE',
+        branch_id: branchId,
       },
     });
     await this.notifier.enquiryReceived(enquiry.id);
@@ -196,17 +235,26 @@ export class EnquiriesService {
     };
   }
 
-  /** Faculty only see enquiries assigned to them. */
+  /**
+   * Head office sees every enquiry, branch admins their branches' enquiries, faculty the ones
+   * assigned to them.
+   */
   async findAll(query: ListEnquiriesQueryDto, actor: AuthUser) {
+    const admin = isAnyAdmin(actor);
     const where: Prisma.admission_enquiriesWhereInput = {
       status: query.status,
       interested_course_id:
         query.courseId === undefined ? undefined : BigInt(query.courseId),
-      assigned_to: isAdmin(actor)
+      assigned_to: admin
         ? query.assignedTo === undefined
           ? undefined
           : BigInt(query.assignedTo)
         : actor.id,
+      ...(admin
+        ? query.unrouted && isAdmin(actor)
+          ? { branch_id: null }
+          : { branch_id: branchIn(this.access.branchScope(actor, query.branchId)) }
+        : {}),
       ...(query.search
         ? {
             OR: [
@@ -233,16 +281,32 @@ export class EnquiriesService {
       where: { id },
       include: enquiryInclude,
     });
-    if (!enquiry || (!isAdmin(actor) && enquiry.assigned_to !== actor.id))
+    if (
+      !enquiry ||
+      (!this.access.isAdminOfBranch(actor, enquiry.branch_id) &&
+        enquiry.assigned_to !== actor.id)
+    )
       throw new NotFoundException('Enquiry not found');
     return enquiry;
   }
 
-  /** Admins update anything; assigned faculty may only change the status. */
+  /**
+   * Admins of the enquiry's branch (or head office) update anything; the assigned person may
+   * only change the status.
+   */
   async update(id: bigint, dto: UpdateEnquiryDto, actor: AuthUser) {
     const before = await this.findOne(id, actor);
-    if (!isAdmin(actor) && dto.assignedTo !== undefined)
-      throw new BadRequestException('Only admins can reassign enquiries');
+    const admin = this.access.isAdminOfBranch(actor, before.branch_id);
+    if (!admin && (dto.assignedTo !== undefined || dto.branchId !== undefined))
+      throw new BadRequestException(
+        'Only admins can reassign or reroute enquiries',
+      );
+    const branchId =
+      dto.branchId === undefined ? before.branch_id : BigInt(dto.branchId);
+    if (dto.branchId !== undefined) {
+      this.access.assertBranchAdmin(actor, branchId);
+      await this.enquiryBranch(dto.branchId);
+    }
     if (dto.assignedTo !== undefined && dto.assignedTo !== null) {
       const assignee = await this.prisma.users.findUnique({
         where: { id: BigInt(dto.assignedTo) },
@@ -250,13 +314,18 @@ export class EnquiriesService {
           status: true,
           deleted_at: true,
           user_roles: { select: { roles: { select: { code: true } } } },
+          branch_staff: {
+            where: { roles: { code: RoleCode.ADMIN } },
+            select: { branch_id: true },
+          },
         },
       });
-      const staff = assignee?.user_roles.some(
-        (ur) =>
-          ur.roles.code === RoleCode.ADMIN ||
-          ur.roles.code === RoleCode.FACULTY,
-      );
+      const staff =
+        assignee?.user_roles.some(
+          (ur) =>
+            ur.roles.code === RoleCode.ADMIN ||
+            ur.roles.code === RoleCode.FACULTY,
+        ) || !!assignee?.branch_staff.length;
       if (
         !assignee ||
         !staff ||
@@ -267,11 +336,23 @@ export class EnquiriesService {
           'assignedTo must be an active admin or faculty member',
         );
       }
+      // A branch admin hands enquiries to the people of that branch (or keeps them).
+      if (isBranchAdmin(actor) && BigInt(dto.assignedTo) !== actor.id) {
+        const atBranch = await this.prisma.branch_staff.findFirst({
+          where: { user_id: BigInt(dto.assignedTo), branch_id: branchId! },
+          select: { user_id: true },
+        });
+        if (!atBranch)
+          throw new BadRequestException(
+            "assignedTo must be on this branch's staff",
+          );
+      }
     }
     const updated = await this.prisma.admission_enquiries.update({
       where: { id },
       data: {
         status: dto.status,
+        branch_id: dto.branchId === undefined ? undefined : branchId,
         assigned_to:
           dto.assignedTo === undefined
             ? undefined
@@ -289,7 +370,7 @@ export class EnquiriesService {
     return updated;
   }
 
-  /** Call notes, oldest first. Same access as the enquiry: admins, or the assigned faculty member. */
+  /** Call notes, oldest first. Same access as the enquiry: its admins, or the assigned person. */
   async notes(id: bigint, actor: AuthUser) {
     await this.findOne(id, actor);
     return this.prisma.enquiry_notes.findMany({
@@ -302,6 +383,28 @@ export class EnquiriesService {
         users: { select: { id: true, full_name: true } },
       },
     });
+  }
+
+  /**
+   * The branch for an enquiry: the one given (must be active), else the only active branch, else
+   * none (head office routes it).
+   */
+  private async enquiryBranch(branchId?: number): Promise<bigint | null> {
+    if (branchId !== undefined) {
+      const branch = await this.prisma.branches.findUnique({
+        where: { id: BigInt(branchId) },
+        select: { id: true, is_active: true },
+      });
+      if (!branch || !branch.is_active)
+        throw new BadRequestException('branchId does not match any branch');
+      return branch.id;
+    }
+    const active = await this.prisma.branches.findMany({
+      where: { is_active: true },
+      select: { id: true },
+      take: 2,
+    });
+    return active.length === 1 ? active[0].id : null;
   }
 
   async addNote(id: bigint, dto: AddEnquiryNoteDto, actor: AuthUser) {
@@ -343,9 +446,12 @@ export class EnquiriesController {
     return this.enquiries.create(dto);
   }
 
-  /** Admins see all enquiries; faculty see the ones assigned to them. */
+  /**
+   * Head office sees all enquiries (`unrouted=true`: the ones without a branch), branch admins
+   * their branches', faculty the ones assigned to them.
+   */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Get()
   findAll(
     @Query() query: ListEnquiriesQueryDto,
@@ -354,8 +460,54 @@ export class EnquiriesController {
     return this.enquiries.findAll(query, user);
   }
 
+  /** The enquiry list as a CSV download (same filters and branches as the list). Admins only. */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
+  @ApiProduces('text/csv')
+  @Get('export')
+  async export(
+    @Query() query: ListEnquiriesQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const rows = await allPages((page, limit) =>
+      this.enquiries.findAll(
+        Object.assign(new ListEnquiriesQueryDto(), query, { page, limit }),
+        user,
+      ),
+    );
+    return csvFile(
+      'enquiries',
+      [
+        'Received',
+        'Name',
+        'Mobile',
+        'Email',
+        'Course',
+        'Branch',
+        'Status',
+        'Assigned to',
+        'Source',
+        'Call notes',
+        'Message',
+      ],
+      rows.map((e) => [
+        e.created_at,
+        e.student_name,
+        e.mobile,
+        e.email,
+        e.courses?.title,
+        e.branches?.name,
+        e.status,
+        e.users?.full_name,
+        e.source,
+        e._count.enquiry_notes,
+        e.message,
+      ]),
+    );
+  }
+
+  @ApiBearerAuth()
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Get(':id')
   findOne(
     @Param('id', ParseIntPipe) id: number,
@@ -366,7 +518,7 @@ export class EnquiriesController {
 
   /** Call notes on the enquiry, oldest first. */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Get(':id/notes')
   notes(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.enquiries.notes(BigInt(id), user);
@@ -374,7 +526,7 @@ export class EnquiriesController {
 
   /** Add a call note. The first note on a NEW enquiry marks it CONTACTED. */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Post(':id/notes')
   addNote(
     @Param('id', ParseIntPipe) id: number,
@@ -384,9 +536,9 @@ export class EnquiriesController {
     return this.enquiries.addNote(BigInt(id), dto, user);
   }
 
-  /** Update follow-up status (NEW, CONTACTED, FOLLOW_UP, CONVERTED, CLOSED) or assignee. */
+  /** Update follow-up status (NEW, CONTACTED, FOLLOW_UP, CONVERTED, CLOSED), assignee or branch. */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,

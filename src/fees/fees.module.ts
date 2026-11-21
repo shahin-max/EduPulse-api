@@ -6,6 +6,7 @@ import {
   RefundsController,
 } from './fees.controller.js';
 import { FeesService } from './fees.service.js';
+import { FeeAccess } from './fee-access.js';
 
 /** Fee plans, invoices, payments and refunds. */
 @Module({
@@ -15,6 +16,6 @@ import { FeesService } from './fees.service.js';
     PaymentsController,
     RefundsController,
   ],
-  providers: [FeesService],
+  providers: [FeeAccess, FeesService],
 })
 export class FeesModule {}

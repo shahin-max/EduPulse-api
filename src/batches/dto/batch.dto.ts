@@ -153,6 +153,12 @@ export class UpdateEnrollmentDto {
 }
 
 export class ListEnrollmentsQueryDto extends PaginationQueryDto {
+  /** Only this branch (branch admins: one of theirs; without it, all their branches). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  branchId?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

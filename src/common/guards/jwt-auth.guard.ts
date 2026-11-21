@@ -59,6 +59,14 @@ export class JwtAuthGuard implements CanActivate {
               status: true,
               deleted_at: true,
               user_roles: { select: { roles: { select: { code: true } } } },
+              // Branch admin rights end as soon as the row is removed or the branch is closed.
+              branch_staff: {
+                where: {
+                  roles: { code: RoleCode.ADMIN },
+                  branches: { is_active: true },
+                },
+                select: { branch_id: true },
+              },
             },
           },
         },
@@ -75,11 +83,15 @@ export class JwtAuthGuard implements CanActivate {
       ) {
         throw new Error('session ended');
       }
+      const roles = user.user_roles.map((ur) => ur.roles.code as RoleCode);
       request.user = {
         id: user.id,
         publicId: user.public_id,
-        roles: user.user_roles.map((ur) => ur.roles.code as RoleCode),
+        roles,
         sessionId: BigInt(payload.sid),
+        adminBranchIds: roles.includes(RoleCode.ADMIN)
+          ? []
+          : user.branch_staff.map((bs) => bs.branch_id),
       };
       return true;
     } catch {

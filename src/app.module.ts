@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { validateEnv } from './config/env.validation.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { AppMailModule } from './mail/mail.module.js';
+import { SmsModule } from './sms/sms.service.js';
 import { AccessModule } from './common/access.service.js';
 import { StorageModule } from './storage/cloudinary.service.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
@@ -27,6 +28,8 @@ import { ReportsModule } from './reports/reports.module.js';
 import { StudentModule } from './student/student.module.js';
 import { ScholarshipsModule } from './scholarships/scholarships.module.js';
 import { HealthController } from './health/health.controller.js';
+import { ScheduleModule } from '@nestjs/schedule';
+import { JobsModule } from './jobs/jobs.js';
 
 @Module({
   imports: [
@@ -42,6 +45,7 @@ import { HealthController } from './health/health.controller.js';
     }),
     PrismaModule,
     AppMailModule,
+    SmsModule,
     AccessModule,
     StorageModule,
     AuthModule,
@@ -59,6 +63,9 @@ import { HealthController } from './health/health.controller.js';
     StudentModule,
     ScholarshipsModule,
     AuditModule,
+    // Registered once here: every import of ScheduleModule.forRoot() would run each job again.
+    ScheduleModule.forRoot(),
+    JobsModule,
   ],
   controllers: [HealthController, PortalsController],
   providers: [

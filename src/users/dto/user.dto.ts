@@ -7,11 +7,13 @@ import {
   IsDate,
   IsEmail,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
   Length,
   Matches,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { users_status } from '../../generated/prisma/enums.js';
 import { ALL_ROLES, RoleCode } from '../../common/auth.js';
@@ -53,12 +55,31 @@ export class CreateUserDto {
   @Matches(PASSWORD_REGEX, { message: PASSWORD_MESSAGE })
   password?: string;
 
-  /** One or more of ADMIN, FACULTY, STUDENT. @example ["FACULTY"] */
+  /**
+   * One or more of ADMIN, FACULTY, STUDENT. May be empty only with `adminBranchId` (an office
+   * manager who runs a branch and doesn't teach). @example ["FACULTY"]
+   */
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayUnique()
   @IsIn(ALL_ROLES, { each: true })
   roles: RoleCode[];
+
+  /** Head office only: make the new account an admin of this branch (a branch admin). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  adminBranchId?: number;
+
+  /**
+   * Branch a new FACULTY member works at (adds them to its staff). Branch admins can only create
+   * STUDENT and FACULTY accounts; with more than one branch they must say which one.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  branchId?: number;
 }
 
 export class UpdateUserDto {

@@ -15,6 +15,6 @@ import { ActivityNotifier } from './activity-notifier.service.js';
 @Module({
   controllers: [AnnouncementsController, NotificationsController],
   providers: [AnnouncementsService, NotificationsService, ActivityNotifier],
-  exports: [NotificationsService, ActivityNotifier],
+  exports: [NotificationsService, ActivityNotifier, AnnouncementsService],
 })
 export class CommunicationsModule {}

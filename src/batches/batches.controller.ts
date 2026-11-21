@@ -13,7 +13,13 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../common/auth.js';
-import { CurrentUser, Public, RoleCode, Roles } from '../common/auth.js';
+import {
+  BRANCH_ADMIN,
+  CurrentUser,
+  Public,
+  RoleCode,
+  Roles,
+} from '../common/auth.js';
 import { BatchesService } from './batches.service.js';
 import { EnrollmentsService } from './enrollments.service.js';
 import {
@@ -48,58 +54,68 @@ export class BatchesController {
   }
 
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Post()
-  create(@Body() dto: CreateBatchDto) {
-    return this.batches.create(dto);
+  create(@Body() dto: CreateBatchDto, @CurrentUser() user: AuthUser) {
+    return this.batches.create(dto, user);
   }
 
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateBatchDto) {
-    return this.batches.update(BigInt(id), dto);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateBatchDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.batches.update(BigInt(id), dto, user);
   }
 
   /** Delete an unused batch. Batches with enrollments or content: set status CANCELLED instead. */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.batches.remove(BigInt(id));
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.batches.remove(BigInt(id), user);
   }
 
   /** Assign a faculty member to teach one of the course's subjects in this batch. */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Post(':id/faculty')
   assignFaculty(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AssignFacultyDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.batches.assignFaculty(BigInt(id), dto);
+    return this.batches.assignFaculty(BigInt(id), dto, user);
   }
 
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id/faculty/:facultyUserId/subjects/:subjectId')
   unassignFaculty(
     @Param('id', ParseIntPipe) id: number,
     @Param('facultyUserId', ParseIntPipe) facultyUserId: number,
     @Param('subjectId', ParseIntPipe) subjectId: number,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.batches.unassignFaculty(
       BigInt(id),
       BigInt(facultyUserId),
       BigInt(subjectId),
+      user,
     );
   }
 
-  /** Students in the batch. Admins and the batch's own faculty only. */
+  /** Students in the batch. Admins of its branch and the batch's own faculty only. */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Get(':id/students')
   roster(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.batches.roster(BigInt(id), user);
@@ -113,16 +129,19 @@ export class EnrollmentsController {
   constructor(private readonly enrollments: EnrollmentsService) {}
 
   /** Enrol a student in a batch. 409 when the batch is full or the student is already enrolled. */
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Post()
   create(@Body() dto: CreateEnrollmentDto, @CurrentUser() user: AuthUser) {
-    return this.enrollments.create(dto, user.id);
+    return this.enrollments.create(dto, user);
   }
 
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Get()
-  findAll(@Query() query: ListEnrollmentsQueryDto) {
-    return this.enrollments.findAll(query);
+  findAll(
+    @Query() query: ListEnrollmentsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.enrollments.findAll(query, user);
   }
 
   /** The logged-in student's enrollments. */
@@ -133,12 +152,13 @@ export class EnrollmentsController {
   }
 
   /** Change status (PENDING, ACTIVE, PAUSED, COMPLETED, CANCELLED) or the access window. */
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateEnrollmentDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.enrollments.update(BigInt(id), dto);
+    return this.enrollments.update(BigInt(id), dto, user);
   }
 }

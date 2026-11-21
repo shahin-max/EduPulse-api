@@ -6,8 +6,13 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { AccessService } from '../common/access.service.js';
-import { AuthUser, isStaff, RoleCode } from '../common/auth.js';
+import { AccessService, branchIn } from '../common/access.service.js';
+import {
+  AuthUser,
+  isBranchAdmin,
+  isStaff,
+  RoleCode,
+} from '../common/auth.js';
 import { paginated, skipTake } from '../common/pagination.js';
 import {
   AssignFacultyDto,
@@ -61,10 +66,18 @@ export class BatchesService {
 
   /**
    * Visitors see PLANNED/ACTIVE batches of published courses (for admissions).
-   * Staff see everything; `mine=true` narrows to the user's own batches.
+   * Staff see everything (branch admins: their branches); `mine=true` narrows to the user's own
+   * batches.
    */
   async findAll(query: ListBatchesQueryDto, user?: AuthUser) {
     let idFilter: Prisma.batchesWhereInput = {};
+    // A branch admin's list is their branches (or the one picked in the branch switcher).
+    const branchScope =
+      user && isBranchAdmin(user)
+        ? this.access.branchScope(user, query.branchId)
+        : query.branchId === undefined
+          ? 'all'
+          : [BigInt(query.branchId)];
     if (query.mine && user) {
       const ids = await this.access.visibleBatchIds(user);
       if (ids !== 'all') idFilter = { id: { in: ids } };
@@ -84,8 +97,7 @@ export class BatchesService {
       ...(query.courseId === undefined
         ? { scholarship_tests: { is: null } }
         : {}),
-      branch_id:
-        query.branchId === undefined ? undefined : BigInt(query.branchId),
+      branch_id: branchIn(branchScope),
       course_id:
         query.courseId === undefined ? undefined : BigInt(query.courseId),
       ...(query.status ? { status: query.status } : {}),
@@ -125,10 +137,13 @@ export class BatchesService {
       batch &&
       ['PLANNED', 'ACTIVE'].includes(batch.status) &&
       batch.courses.status === 'PUBLISHED';
+    const staffOk =
+      isStaff(user) &&
+      (!isBranchAdmin(user) || (await this.access.canManageBatch(user!, id)));
     if (
       !batch ||
       (!publicOk &&
-        !isStaff(user) &&
+        !staffOk &&
         !(user && (await this.access.activeEnrollment(user.id, id))))
     ) {
       throw new NotFoundException('Batch not found');
@@ -145,9 +160,13 @@ export class BatchesService {
     );
   }
 
-  async create(dto: CreateBatchDto) {
+  /** Branch admins open batches only at their branches, for courses the branch offers. */
+  async create(dto: CreateBatchDto, user: AuthUser) {
+    this.access.assertBranchAdmin(user, BigInt(dto.branchId));
     await this.assertBranch(dto.branchId);
     await this.assertCourse(dto.courseId);
+    if (isBranchAdmin(user))
+      await this.assertOffered(dto.branchId, dto.courseId);
     assertDates(dto.startDate, dto.endDate);
     const batch = await this.prisma.batches.create({
       data: {
@@ -165,8 +184,8 @@ export class BatchesService {
     return present(batch);
   }
 
-  async update(id: bigint, dto: UpdateBatchDto) {
-    const existing = await this.access.assertBatchExists(id);
+  async update(id: bigint, dto: UpdateBatchDto, user: AuthUser) {
+    const existing = await this.assertBatchAdmin(id, user);
     if (
       dto.courseId !== undefined &&
       BigInt(dto.courseId) !== existing.course_id
@@ -179,6 +198,8 @@ export class BatchesService {
           'Remove the faculty assignments before moving the batch to another course',
         );
       await this.assertCourse(dto.courseId);
+      if (isBranchAdmin(user))
+        await this.assertOffered(existing.branch_id, dto.courseId);
     }
     assertDates(
       dto.startDate === undefined ? existing.start_date : dto.startDate,
@@ -211,16 +232,17 @@ export class BatchesService {
   }
 
   /** Only a batch with no enrollments or content can be deleted; otherwise mark it CANCELLED. */
-  async remove(id: bigint): Promise<void> {
-    await this.access.assertBatchExists(id);
+  async remove(id: bigint, user: AuthUser): Promise<void> {
+    await this.assertBatchAdmin(id, user);
     await this.prisma.$transaction([
       this.prisma.batch_faculty.deleteMany({ where: { batch_id: id } }),
       this.prisma.batches.delete({ where: { id } }),
     ]);
   }
 
-  async assignFaculty(batchId: bigint, dto: AssignFacultyDto) {
-    const batch = await this.access.assertBatchExists(batchId);
+  /** Branch admins can assign faculty who work at the batch's branch (branch staff). */
+  async assignFaculty(batchId: bigint, dto: AssignFacultyDto, user: AuthUser) {
+    const batch = await this.assertBatchAdmin(batchId, user);
     const facultyUserId = BigInt(dto.facultyUserId);
     const subjectId = BigInt(dto.subjectId);
     const faculty = await this.prisma.faculty_profiles.findUnique({
@@ -247,6 +269,20 @@ export class BatchesService {
       throw new BadRequestException(
         'facultyUserId must belong to an active faculty member',
       );
+    }
+    if (isBranchAdmin(user)) {
+      const atBranch = await this.prisma.branch_staff.findFirst({
+        where: {
+          user_id: facultyUserId,
+          branch_id: batch.branch_id,
+          roles: { code: RoleCode.FACULTY },
+        },
+        select: { user_id: true },
+      });
+      if (!atBranch)
+        throw new BadRequestException(
+          "Add this faculty member to the branch's staff first",
+        );
     }
     const cs = await this.prisma.course_subjects.findUnique({
       where: {
@@ -287,7 +323,9 @@ export class BatchesService {
     batchId: bigint,
     facultyUserId: bigint,
     subjectId: bigint,
+    user: AuthUser,
   ): Promise<void> {
+    await this.assertBatchAdmin(batchId, user);
     await this.prisma.batch_faculty.delete({
       where: {
         batch_id_faculty_user_id_subject_id: {
@@ -333,6 +371,31 @@ export class BatchesService {
         },
       },
     });
+  }
+
+  /** The batch, after checking the user administers its branch. */
+  private async assertBatchAdmin(id: bigint, user: AuthUser) {
+    const batch = await this.access.assertBatchExists(id);
+    this.access.assertBranchAdmin(user, batch.branch_id);
+    return batch;
+  }
+
+  private async assertOffered(
+    branchId: number | bigint,
+    courseId: number,
+  ): Promise<void> {
+    const offered = await this.prisma.branch_courses.findFirst({
+      where: {
+        branch_id: BigInt(branchId),
+        course_id: BigInt(courseId),
+        is_active: true,
+      },
+      select: { course_id: true },
+    });
+    if (!offered)
+      throw new BadRequestException(
+        'This branch does not offer that course; ask head office to add it',
+      );
   }
 
   private async assertBranch(branchId: number): Promise<void> {

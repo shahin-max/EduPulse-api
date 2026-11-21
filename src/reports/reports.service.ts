@@ -4,9 +4,11 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { subjectPerformance } from './subject-performance.js';
 import {
   AccessService,
+  BranchScope,
+  branchIn,
   currentEnrollmentWhere,
 } from '../common/access.service.js';
-import { AuthUser, isAdmin } from '../common/auth.js';
+import { AuthUser, isAdmin, isBranchAdmin } from '../common/auth.js';
 
 /** Enrollments that count as the batch's students in reports (not pending or cancelled). */
 const REPORT_ENROLLMENT_STATUSES = ['ACTIVE', 'PAUSED', 'COMPLETED'] as const;
@@ -391,10 +393,14 @@ export class ReportsService {
    * (admins: every batch).
    */
   async dashboard(user: AuthUser) {
-    // Only batches the person teaches count (admins: all of them).
+    // Only batches the person teaches count (head office: all of them; branch admins: their
+    // branches' batches).
+    const branchAdmin = isBranchAdmin(user);
     const batchIds: bigint[] | 'all' = isAdmin(user)
       ? 'all'
-      : (
+      : branchAdmin
+        ? await this.access.visibleBatchIds(user)
+        : (
           await this.prisma.batch_faculty.findMany({
             where: { faculty_user_id: user.id },
             select: { batch_id: true },
@@ -411,7 +417,7 @@ export class ReportsService {
       status: { not: 'CANCELLED' },
       ends_at: { lt: now, gte: new Date(now.getTime() - 14 * DAY_MS) },
       class_attendance: { none: {} },
-      ...(isAdmin(user)
+      ...(isAdmin(user) || branchAdmin
         ? {}
         : { OR: [{ faculty_user_id: user.id }, { faculty_user_id: null }] }),
     };
@@ -633,7 +639,8 @@ export class ReportsService {
    * (confirmed payments minus confirmed refunds), new enrollments, enquiries and how many of them
    * converted, plus attendance per active batch.
    */
-  async adminSummary(months = 6) {
+  async adminSummary(scope: BranchScope = 'all', months = 6) {
+    const branch = branchIn(scope);
     const IST_MS = 330 * 60 * 1000;
     const nowIst = new Date(Date.now() + IST_MS);
     const keys: string[] = [];
@@ -652,12 +659,17 @@ export class ReportsService {
     const [payments, refunds, enrollments, enquiries, batches] =
       await Promise.all([
         this.prisma.payments.findMany({
-          where: { status: 'CONFIRMED', paid_at: { gte: from } },
+          where: {
+            status: 'CONFIRMED',
+            paid_at: { gte: from },
+            branch_id: branch,
+          },
           select: { amount: true, paid_at: true },
         }),
         this.prisma.payment_refunds.findMany({
           where: {
             status: 'CONFIRMED',
+            payments: { branch_id: branch },
             OR: [
               { refunded_at: { gte: from } },
               { refunded_at: null, created_at: { gte: from } },
@@ -669,17 +681,22 @@ export class ReportsService {
           where: {
             enrolled_at: { gte: from },
             status: { not: 'CANCELLED' },
+            branch_id: branch,
             // Scholarship Test candidates are not admissions.
             batches: { scholarship_tests: { is: null } },
           },
           select: { enrolled_at: true },
         }),
         this.prisma.admission_enquiries.findMany({
-          where: { created_at: { gte: from } },
+          where: { created_at: { gte: from }, branch_id: branch },
           select: { created_at: true, status: true },
         }),
         this.prisma.batches.findMany({
-          where: { status: 'ACTIVE', scholarship_tests: { is: null } },
+          where: {
+            status: 'ACTIVE',
+            scholarship_tests: { is: null },
+            branch_id: branch,
+          },
           select: { id: true, code: true, name: true },
           orderBy: { name: 'asc' },
         }),

@@ -55,6 +55,32 @@ Users can hold several roles (`user_roles`).
 | **STUDENT** | Own profile; content, classes, assignments, exams, announcements and results of batches where they hold an **ACTIVE** enrollment; own attendance and fees |
 | Visitor | Published courses and syllabus, open batches, faculty list, website content, enquiry form, sign-up |
 
+### Branches: head office and branch admins
+
+Nobody picks a branch before signing in: the account decides. Everyone uses the same login page.
+
+- **Head office** = the global `ADMIN` role. Sees and runs every branch; `branchId` on lists (batches,
+  enrollments, invoices, payments, enquiries, `/reports/admin-summary`) narrows to one branch for the portal's
+  branch switcher.
+- **Branch admin** = `ADMIN` in `branch_staff` for a branch, without the global role. Head office adds one with
+  `POST /branches/:id/staff { userId, role: "ADMIN" }` and removes them with
+  `DELETE /branches/:id/staff/:userId/ADMIN` (access ends on the next request; closing the branch ends it too).
+  Responses report them with the role `BRANCH_ADMIN`, and `GET /auth/me` returns `is_head_office` and
+  `admin_branches`, so the website sends them to the admin portal limited to those branches.
+- A branch admin manages, at their branches only: batches (only for courses head office offers there:
+  `PUT/DELETE /branches/:id/courses/:courseId`), faculty assignment (faculty on the branch staff), enrollments,
+  classes and attendance, fee plans/invoices/payments/refunds (plans for every branch are read-only), enquiries,
+  BRANCH and batch announcements, gradebooks and the admin summary. They see their branches' students and faculty
+  plus students not admitted anywhere yet, and can create STUDENT and FACULTY accounts (new faculty join their
+  branch staff, `branchId` picks the branch when they run several).
+- Head office only: branches, the course catalog and question bank, website content, Scholarship Tests, roles,
+  deleting accounts, the audit log and other admins.
+- Enquiries carry a branch: the website form may send `branchId`; with a single active branch it is filled in,
+  otherwise head office routes it (`GET /admission-enquiries?unrouted=true`, then `PATCH { branchId }`). Branch
+  admins are notified of their branches' new enquiries.
+- Faculty work at several branches by being on each branch's staff (`role: "FACULTY"`); what they can open is
+  still decided by `batch_faculty`.
+
 Every request re-checks the session, account status and roles in the database, so logout,
 suspension and role changes take effect immediately (not when the 15-minute access token expires).
 
@@ -66,8 +92,11 @@ suspension and role changes take effect immediately (not when the 15-minute acce
 - Password reset and email/mobile verification use single-use tokens in `auth_tokens` (stored hashed).
   Accounts with an email get a link by email (`@nestjs/mail`; set `SMTP_URL`, `MAIL_FROM` and
   `APP_WEB_URL`): `/set-password?token=` for resets and `/verify-email?token=` for verification. Without
-  `SMTP_URL` the email is only logged (with the link outside production). **No SMS provider is connected
-  yet**: tokens for mobile-only accounts are only logged. Tokens are returned as `devToken` when
+  `SMTP_URL` the email is only logged (with the link outside production). Mobile-only accounts get the link
+  by SMS when `SMS_PROVIDER` is set: `twilio` (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`) or
+  `msg91` for Indian DLT routes (`MSG91_AUTH_KEY` and one approved Flow template per message,
+  `MSG91_TEMPLATE_PASSWORD_RESET` and `MSG91_TEMPLATE_MOBILE_VERIFY`, each with a `##link##` variable). The API
+  refuses to start with a half-configured provider. Without one, SMS are only logged. Tokens are returned as `devToken` when
   `EXPOSE_DEV_TOKENS=true` outside production. Admins can also issue a token with
   `POST /users/:id/password-token`, and creating a user without a password returns a `setupToken`.
 - Mobiles are stored as `+91XXXXXXXXXX`; `98765 43210`, `09876543210` and `+91 98765-43210` all match.
@@ -93,7 +122,9 @@ suspension and role changes take effect immediately (not when the 15-minute acce
   `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` (two different random strings of 32+ characters),
   `CORS_ORIGINS` (the Netlify URL and any custom domain, comma separated), `APP_WEB_URL` (the public site,
   for email links), `SMTP_URL` and `MAIL_FROM` (password reset emails), `EXPOSE_DEV_TOKENS=false`.
-  Railway sets `PORT`.
+  Optionally `SMS_PROVIDER` and its keys (see Authentication). Railway sets `PORT`.
+- Background jobs run every minute (`JOBS_ENABLED`, on by default) and take a MySQL lock (`job_locks`), so
+  running several API instances is safe: each job runs on one of them at a time.
 - `TRUST_PROXY` defaults to 1 in production, which matches Railway's proxy; without it every visitor would
   share one rate limit and audit logs would show the proxy's address.
 - **Uploads:** set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` (and optionally
@@ -193,8 +224,27 @@ test is published for their batch, when their work is marked, when an invoice is
 confirmed; staff when an enquiry is assigned to them. Links point at the student/faculty portal pages.
 Classes: the batch is told when a future class is scheduled, moved (old and new time), cancelled or gets a
 recording, and students plus the class teacher get a "Class at 5:30 pm" reminder for classes starting within the
-hour. There is no job scheduler: reminders run when notifications are read (the portal bell polls every minute),
-at most once a minute per instance, and each person gets each reminder once.
+hour. Each person gets each reminder once.
+
+Fee invoices and payments, marked work, new assignments and tests, Scholarship Test results and announcements
+are also **emailed** to recipients with an email address when `SMTP_URL` is set (`EMAIL_NOTIFICATIONS=false`
+turns this off). Emails are sent in the background; a mail failure never fails the action.
+
+## Background jobs
+
+`@nestjs/schedule` runs two jobs every minute: sending scheduled announcements once they are due, and the
+class reminders. `@nestjs/locks` with a MySQL store (`src/jobs/mysql-lock-store.ts`, table `job_locks`, checked
+against the package's store contract in `test/lock-store.e2e-spec.ts`) keeps each job on one instance and stops
+it overlapping itself. Both jobs are idempotent, so a missed or repeated minute is harmless. With
+`JOBS_ENABLED=false` (the e2e suites) the old fallback runs instead: due work is picked up when notifications or
+the announcement feed are read.
+
+## CSV exports
+
+Admins (branch admins: their branches) download the same data as the lists, with the same filters, as CSV
+(UTF-8 with BOM for Excel, formulas neutralised, at most 20,000 rows): `GET /fee-invoices/export`,
+`GET /payments/export` (payments register), `GET /admission-enquiries/export` and, for anyone who can open the
+gradebook, `GET /batches/:id/gradebook/export`.
 
 ## Student portal views
 
@@ -230,12 +280,15 @@ src/learning/      files, study materials, progress, assignments, submissions
 src/exams/         question bank, exams, attempts, grading, leaderboards
 src/classes/       class sessions, attendance
 src/fees/          fee plans, invoices, payments, refunds
-src/communications/ announcements, notifications
+src/communications/ announcements, notifications (with email copies)
 src/audit/         audit interceptor and log
 src/mail/          email transport (SMTP, or logged when not configured)
 src/storage/       Cloudinary storage (files and profile photos)
 src/reports/       teaching dashboard, batch gradebook, student progress report
 src/student/       student portal views (courses, assignments, course materials)
+src/jobs/          every-minute jobs and their MySQL lock store
+src/sms/           SMS sender (Twilio, MSG91, or logged)
+src/branches/      branches, branch staff (branch admins, faculty), courses offered
 test/              e2e suites and helpers
 ```
 

@@ -74,11 +74,15 @@ export class AuthController {
     return this.auth.logoutAll(user.id);
   }
 
-  /** The logged-in user with roles and student/faculty profile. */
+  /**
+   * The logged-in user with roles and student/faculty profile. `is_head_office` and
+   * `admin_branches` tell the admin portal which branches to show: head office sees every branch
+   * (and can switch between them); a branch admin only `admin_branches`.
+   */
   @ApiBearerAuth()
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
-    return this.auth.me(user.id);
+    return this.auth.me(user.id, user);
   }
 
   /** Change your password. Signs out your other devices. */

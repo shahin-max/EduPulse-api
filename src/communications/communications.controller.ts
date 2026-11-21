@@ -13,7 +13,13 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../common/auth.js';
-import { CurrentUser, RoleCode, Roles, SkipAudit } from '../common/auth.js';
+import {
+  BRANCH_ADMIN,
+  CurrentUser,
+  RoleCode,
+  Roles,
+  SkipAudit,
+} from '../common/auth.js';
 import { AnnouncementsService } from './announcements.service.js';
 import { NotificationsService } from './notifications.service.js';
 import { ActivityNotifier } from './activity-notifier.service.js';
@@ -33,14 +39,14 @@ export class AnnouncementsController {
   constructor(private readonly announcements: AnnouncementsService) {}
 
   /** Create a draft, or publish straight away with publish=true. Faculty may only post to their batches. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Post()
   create(@Body() dto: CreateAnnouncementDto, @CurrentUser() user: AuthUser) {
     return this.announcements.create(dto, user);
   }
 
   /** Manage announcements: admins see all, faculty see their own. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Get()
   list(
     @Query() query: ListAnnouncementsQueryDto,
@@ -64,7 +70,7 @@ export class AnnouncementsController {
     return this.announcements.findOne(BigInt(id), user);
   }
 
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -75,7 +81,7 @@ export class AnnouncementsController {
   }
 
   /** Publish now, or at publish_at if that is in the future. Notifies the audience once it is due. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Post(':id/publish')
   publish(
     @Param('id', ParseIntPipe) id: number,
@@ -84,7 +90,7 @@ export class AnnouncementsController {
     return this.announcements.publish(BigInt(id), user);
   }
 
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Post(':id/archive')
   archive(
     @Param('id', ParseIntPipe) id: number,
@@ -94,7 +100,7 @@ export class AnnouncementsController {
   }
 
   /** Admins delete any announcement; authors delete their drafts. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {

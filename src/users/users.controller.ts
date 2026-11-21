@@ -14,7 +14,14 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../common/auth.js';
-import { CurrentUser, Public, RoleCode, Roles } from '../common/auth.js';
+import {
+  BRANCH_ADMIN,
+  CurrentUser,
+  Public,
+  RoleCode,
+  Roles,
+} from '../common/auth.js';
+import { AccessService } from '../common/access.service.js';
 import { StudentSelfProfileDto } from '../auth/dto/auth.dto.js';
 import { UsersService } from './users.service.js';
 import { ProfilesService } from './profiles.service.js';
@@ -28,6 +35,10 @@ import {
   UpdateUserDto,
 } from './dto/user.dto.js';
 
+/**
+ * Head office manages every account. Branch admins manage the students and faculty of their
+ * branches (and students not enrolled anywhere yet); roles and deletion stay with head office.
+ */
 @ApiTags('Users')
 @ApiBearerAuth()
 @Roles(RoleCode.ADMIN)
@@ -36,21 +47,28 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   /** Create an account with one or more roles. Without a password the response includes a `setupToken`. */
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Post()
-  create(@Body() dto: CreateUserDto) {
-    return this.users.create(dto);
+  create(@Body() dto: CreateUserDto, @CurrentUser() actor: AuthUser) {
+    return this.users.create(dto, actor);
   }
 
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Get()
-  findAll(@Query() query: ListUsersQueryDto) {
-    return this.users.findAll(query);
+  findAll(@Query() query: ListUsersQueryDto, @CurrentUser() actor: AuthUser) {
+    return this.users.findAll(query, actor);
   }
 
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.users.findOne(BigInt(id));
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.users.findOne(BigInt(id), actor);
   }
 
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -81,9 +99,13 @@ export class UsersController {
   }
 
   /** Issue a one-hour token the user can use at POST /auth/password/reset (e.g. forgotten password). */
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Post(':id/password-token')
-  passwordToken(@Param('id', ParseIntPipe) id: number) {
-    return this.users.issuePasswordToken(BigInt(id));
+  passwordToken(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.users.issuePasswordToken(BigInt(id), actor);
   }
 }
 
@@ -91,7 +113,10 @@ export class UsersController {
 @ApiBearerAuth()
 @Controller('students')
 export class StudentsController {
-  constructor(private readonly profiles: ProfilesService) {}
+  constructor(
+    private readonly profiles: ProfilesService,
+    private readonly access: AccessService,
+  ) {}
 
   /** Your own student profile. */
   @Roles(RoleCode.STUDENT)
@@ -108,7 +133,7 @@ export class StudentsController {
   }
 
   /** A student's profile. Faculty can only see students in their own batches. */
-  @Roles(RoleCode.ADMIN, RoleCode.FACULTY)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN, RoleCode.FACULTY)
   @Get(':userId')
   findOne(
     @Param('userId', ParseIntPipe) userId: number,
@@ -118,12 +143,14 @@ export class StudentsController {
   }
 
   /** Update any student profile field, including admission number and joining date. */
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Patch(':userId')
-  update(
+  async update(
     @Param('userId', ParseIntPipe) userId: number,
     @Body() dto: AdminStudentProfileDto,
+    @CurrentUser() actor: AuthUser,
   ) {
+    await this.access.assertCanManageUser(actor, BigInt(userId));
     return this.profiles.updateStudent(BigInt(userId), dto);
   }
 }
@@ -131,7 +158,10 @@ export class StudentsController {
 @ApiTags('Faculty')
 @Controller('faculty')
 export class FacultyController {
-  constructor(private readonly profiles: ProfilesService) {}
+  constructor(
+    private readonly profiles: ProfilesService,
+    private readonly access: AccessService,
+  ) {}
 
   /** Faculty shown on the website (name, qualification, specialization, biography). */
   @Public()
@@ -161,14 +191,16 @@ export class FacultyController {
     return this.profiles.getPublicFaculty(BigInt(userId));
   }
 
-  /** Update any faculty profile field, including employee code and joining date. */
+  /** Update any faculty profile field, including employee code and joining date (branch admins: their branch's faculty). */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Patch(':userId')
-  update(
+  async update(
     @Param('userId', ParseIntPipe) userId: number,
     @Body() dto: AdminFacultyProfileDto,
+    @CurrentUser() actor: AuthUser,
   ) {
+    await this.access.assertCanManageUser(actor, BigInt(userId));
     return this.profiles.updateFaculty(BigInt(userId), dto);
   }
 }

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { jobsEnabled } from '../jobs/jobs-config.js';
 import { currentEnrollmentWhere } from '../common/access.service.js';
 import {
   NotificationInput,
@@ -55,6 +57,7 @@ export class ActivityNotifier {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly config: ConfigService,
   ) {}
 
   /** A new or newly published assignment: its batch's current students. */
@@ -75,6 +78,7 @@ export class ActivityNotifier {
         title: `New assignment: ${a.title}`,
         message: a.due_at ? `Due ${shortDate(a.due_at)}.` : 'No due date.',
         linkUrl: `/student/assignments/${a.id}`,
+        email: true,
       });
     });
   }
@@ -103,6 +107,7 @@ export class ActivityNotifier {
             .filter(Boolean)
             .join(' ') || 'Your teacher has reviewed your work.',
         linkUrl: `/student/assignments/${s.assignments.id}`,
+        email: true,
       });
     });
   }
@@ -161,15 +166,31 @@ export class ActivityNotifier {
         select: {
           student_name: true,
           mobile: true,
+          branch_id: true,
           courses: { select: { title: true } },
         },
       });
       if (!e) return;
+      // Head office, and the admins of the enquiry's branch.
       const admins = await this.prisma.users.findMany({
         where: {
           status: 'ACTIVE',
           deleted_at: null,
-          user_roles: { some: { roles: { code: 'ADMIN' } } },
+          OR: [
+            { user_roles: { some: { roles: { code: 'ADMIN' } } } },
+            ...(e.branch_id === null
+              ? []
+              : [
+                  {
+                    branch_staff: {
+                      some: {
+                        branch_id: e.branch_id,
+                        roles: { code: 'ADMIN' },
+                      },
+                    },
+                  },
+                ]),
+          ],
         },
         select: { id: true },
       });
@@ -211,6 +232,7 @@ export class ActivityNotifier {
         title: `New test: ${exam.title}`,
         message: `${when}. ${exam.duration_minutes} minutes.`,
         linkUrl: `/student/tests#exam-${examId}`,
+        email: true,
       });
     });
   }
@@ -236,6 +258,7 @@ export class ActivityNotifier {
         title: `Fee invoice ${i.invoice_number}`,
         message: `${rupees(amount)}${i.due_date ? `, due ${i.due_date.toLocaleDateString('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' })}` : ''}.`,
         linkUrl: `/student/fees#invoice-${invoiceId}`,
+        email: true,
       });
     });
   }
@@ -263,6 +286,7 @@ export class ActivityNotifier {
         title: `Payment received: ${rupees(p.amount)}`,
         message: `Against invoice ${p.fee_invoices.invoice_number}.${p.receipt_number ? ` Receipt ${p.receipt_number}.` : ''}`,
         linkUrl: `/student/fees#payment-${paymentId}`,
+        email: true,
       });
     });
   }
@@ -354,13 +378,21 @@ export class ActivityNotifier {
   }
 
   /**
-   * "Class at 5:30 pm" reminders for classes starting within the next hour, to the batch's students
-   * and the class teacher, once each. There is no job scheduler: like scheduled announcements this
-   * runs when notifications are read (the portal bell polls every minute), at most once a minute.
+   * Fallback when background jobs are off (JOBS_ENABLED=false): runs the class reminders when
+   * notifications are read (the portal bell polls every minute), at most once a minute.
    */
   async remindUpcomingClassesLazily(): Promise<void> {
+    if (jobsEnabled(this.config)) return;
     if (Date.now() - this.lastReminderRun < 60_000) return;
     this.lastReminderRun = Date.now();
+    await this.remindUpcomingClasses();
+  }
+
+  /**
+   * "Class at 5:30 pm" reminders for classes starting within the next hour, to the batch's students
+   * and the class teacher, once each. Run every minute by the scheduled jobs.
+   */
+  async remindUpcomingClasses(): Promise<void> {
     await this.safe('class reminders', async () => {
       const now = new Date();
       const soon = await this.prisma.class_sessions.findMany({

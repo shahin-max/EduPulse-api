@@ -1,5 +1,5 @@
 import type { Prisma } from '../generated/prisma/client.js';
-import type { RoleCode } from '../common/auth.js';
+import { BRANCH_ADMIN, RoleCode, type AccessRole } from '../common/auth.js';
 import { normalizeMobile } from '../common/validation.js';
 
 /** User columns that are safe to return over the API (never password_hash). */
@@ -18,6 +18,11 @@ export const safeUserSelect = {
   updated_at: true,
   deleted_at: true,
   user_roles: { select: { roles: { select: { code: true } } } },
+  // Admin of an active branch: reported as the BRANCH_ADMIN role.
+  branch_staff: {
+    where: { roles: { code: RoleCode.ADMIN }, branches: { is_active: true } },
+    select: { branch_id: true },
+  },
 } satisfies Prisma.usersSelect;
 
 export const userDetailSelect = {
@@ -26,14 +31,24 @@ export const userDetailSelect = {
   faculty_profiles: { omit: { user_id: true } },
 } satisfies Prisma.usersSelect;
 
-type WithRoleRows = { user_roles: { roles: { code: string } }[] };
+type WithRoleRows = {
+  user_roles: { roles: { code: string } }[];
+  branch_staff?: { branch_id: bigint }[];
+};
 
 /** Flattens user_roles into `roles: ["ADMIN", ...]` for API responses. */
 export function withRoles<T extends WithRoleRows>({
   user_roles,
+  branch_staff,
   ...user
-}: T): Omit<T, 'user_roles'> & { roles: RoleCode[] } {
-  return { ...user, roles: user_roles.map((ur) => ur.roles.code as RoleCode) };
+}: T): Omit<T, 'user_roles' | 'branch_staff'> & { roles: AccessRole[] } {
+  const roles: AccessRole[] = user_roles.map(
+    (ur) => ur.roles.code as RoleCode,
+  );
+  // Someone who runs an active branch (and is not head office) goes to the admin portal.
+  if (!roles.includes(RoleCode.ADMIN) && branch_staff?.length)
+    roles.push(BRANCH_ADMIN);
+  return { ...user, roles };
 }
 
 export type SafeUser = ReturnType<

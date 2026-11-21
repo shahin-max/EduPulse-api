@@ -8,7 +8,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { AuthUser, isAdmin } from '../common/auth.js';
+import { AuthUser, isAnyAdmin } from '../common/auth.js';
+import { BranchScope, branchIn } from '../common/access.service.js';
 import { paginated, skipTake } from '../common/pagination.js';
 import {
   draftInvoiceNumber,
@@ -128,9 +129,13 @@ export class FeesService {
     });
   }
 
-  listPlans(query: ListFeePlansQueryDto) {
+  /** `scope`: the admin's branches; plans for every branch (branch_id NULL) are always listed. */
+  listPlans(query: ListFeePlansQueryDto, scope: BranchScope = 'all') {
     return this.prisma.fee_plans.findMany({
       where: {
+        ...(scope === 'all'
+          ? {}
+          : { OR: [{ branch_id: null }, { branch_id: { in: scope } }] }),
         course_id:
           query.courseId === undefined ? undefined : BigInt(query.courseId),
         batch_id:
@@ -283,7 +288,8 @@ export class FeesService {
     return this.loadInvoice(id);
   }
 
-  async listInvoices(query: ListInvoicesQueryDto) {
+  /** `scope`: the branches to include (the caller's, narrowed by query.branchId). */
+  async listInvoices(query: ListInvoicesQueryDto, scope: BranchScope = 'all') {
     const where: Prisma.fee_invoicesWhereInput = {
       enrollment_id:
         query.enrollmentId === undefined
@@ -304,8 +310,7 @@ export class FeesService {
             status: { in: ['ISSUED', 'PART_PAID'] },
           }
         : {}),
-      branch_id:
-        query.branchId === undefined ? undefined : BigInt(query.branchId),
+      branch_id: branchIn(scope),
       ...(query.search
         ? {
             OR: [
@@ -382,11 +387,11 @@ export class FeesService {
     };
   }
 
-  async listPayments(query: ListPaymentsQueryDto) {
+  /** `scope`: the branches to include (the caller's, narrowed by query.branchId). */
+  async listPayments(query: ListPaymentsQueryDto, scope: BranchScope = 'all') {
     const period =
       query.from || query.to ? { gte: query.from, lt: query.to } : undefined;
-    const branch =
-      query.branchId === undefined ? undefined : BigInt(query.branchId);
+    const branch = branchIn(scope);
     const where: Prisma.paymentsWhereInput = {
       branch_id: branch,
       method: query.method,
@@ -460,11 +465,14 @@ export class FeesService {
     };
   }
 
-  /** Admins see any invoice; students see their own issued (non-draft) invoices. */
+  /**
+   * Admins see any invoice (the controller checks a branch admin's branch); students see their
+   * own issued (non-draft) invoices.
+   */
   async getInvoiceFor(id: bigint, user: AuthUser) {
     const invoice = await this.loadInvoice(id);
     if (
-      !isAdmin(user) &&
+      !isAnyAdmin(user) &&
       (invoice.enrollments.student_user_id !== user.id ||
         invoice.status === 'DRAFT')
     ) {
@@ -662,7 +670,7 @@ export class FeesService {
 
   async getPaymentFor(id: bigint, user: AuthUser) {
     const payment = await this.loadPayment(id);
-    if (!isAdmin(user)) {
+    if (!isAnyAdmin(user)) {
       const owner = await this.prisma.fee_invoices.findUnique({
         where: { id: payment.invoice_id },
         select: {

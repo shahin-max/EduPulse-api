@@ -1,3 +1,5 @@
+import { SMS_SETTINGS } from '../sms/sms.service.js';
+
 const REQUIRED = [
   'DATABASE_URL',
   'JWT_ACCESS_SECRET',
@@ -34,6 +36,21 @@ export function validateEnv(
     throw new Error(
       `Set all of ${cloudinary.join(', ')} to use Cloudinary, or none of them`,
     );
+  }
+  const sms = typeof config.SMS_PROVIDER === 'string'
+    ? config.SMS_PROVIDER.trim().toLowerCase()
+    : '';
+  if (sms && sms !== 'log' && !(sms in SMS_SETTINGS))
+    throw new Error('SMS_PROVIDER must be "twilio", "msg91" or empty');
+  if (sms in SMS_SETTINGS) {
+    const needed = SMS_SETTINGS[sms as keyof typeof SMS_SETTINGS];
+    const absent = needed.filter(
+      (key) => typeof config[key] !== 'string' || config[key].trim() === '',
+    );
+    if (absent.length)
+      throw new Error(
+        `SMS_PROVIDER=${sms} also needs: ${absent.join(', ')}`,
+      );
   }
   const portals = config.PORTALS_OPEN;
   if (

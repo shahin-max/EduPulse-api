@@ -13,7 +13,7 @@ import { ApiTags } from '@nestjs/swagger';
 import {
   AuthenticatedRequest,
   IS_PUBLIC_KEY,
-  isAdmin,
+  isAnyAdmin,
   Public,
 } from './auth.js';
 
@@ -46,7 +46,7 @@ export class PortalsGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     if (portalsOpen(this.config) === 'all') return true;
     const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    if (!user || isAdmin(user)) return true;
+    if (!user || isAnyAdmin(user)) return true;
     const open = this.reflector.getAllAndOverride<boolean>(
       OPEN_BEFORE_LAUNCH_KEY,
       [context.getHandler(), context.getClass()],

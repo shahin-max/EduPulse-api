@@ -28,7 +28,10 @@ export class CreateAnnouncementDto {
   @Length(1, 20000)
   body: string;
 
-  /** ALL, ADMINS, FACULTY, STUDENTS or BATCH (faculty may only post to BATCH). */
+  /**
+   * ALL, ADMINS, FACULTY, STUDENTS (head office), BRANCH (head office or the branch's admins:
+   * everyone studying, teaching or working at the branch) or BATCH (faculty may only post to BATCH).
+   */
   @IsIn(Object.values(announcements_audience))
   audience: announcements_audience;
 
@@ -37,6 +40,12 @@ export class CreateAnnouncementDto {
   @IsInt()
   @Min(1)
   batchId?: number;
+
+  /** Required when audience is BRANCH, and only then. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  branchId?: number;
 
   /** Optional scheduled time; it becomes visible (and notifies) from then on. */
   @IsOptional()
@@ -71,6 +80,12 @@ export class UpdateAnnouncementDto {
   @IsInt()
   @Min(1)
   batchId?: number | null;
+
+  /** null clears it (when moving away from BRANCH). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  branchId?: number | null;
 
   @IsOptional()
   @Type(() => Date)

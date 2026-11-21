@@ -1099,3 +1099,12 @@ model scholarship_awards {
   @@index([student_user_id], map: "fk_award_student")
   @@index([used_invoice_id], map: "fk_award_invoice")
 }
+
+/// Scheduled-job locks (see src/jobs/mysql-lock-store.ts), found by the SHA-256 of the key.
+model job_locks {
+  key_hash      Bytes    @id @db.Binary(32)
+  lock_key      String   @db.Text
+  owner         String?  @db.VarChar(128)
+  fencing_token BigInt   @db.UnsignedBigInt
+  expires_at    DateTime @db.DateTime(3)
+}

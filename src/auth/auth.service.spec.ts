@@ -10,6 +10,13 @@ import type { PrismaService } from '../prisma/prisma.service.js';
 import { AuthService, sameHash } from './auth.service.js';
 import { OneTimeTokenService, sha256 } from './one-time-token.service.js';
 import type { PasswordService } from './password.service.js';
+import type { SmsService } from '../sms/sms.service.js';
+
+/** SMS is only logged in these tests. */
+const sms = {
+  provider: 'log',
+  send: vi.fn().mockResolvedValue(undefined),
+} as unknown as SmsService;
 import { safeUserSelect } from '../users/user-select.js';
 
 const env: Record<string, string> = {
@@ -62,6 +69,7 @@ function setup() {
     prisma as unknown as PrismaService,
     config,
     { send: vi.fn().mockResolvedValue({}) } as unknown as Mailer,
+    sms,
   );
   const service = new AuthService(
     prisma as unknown as PrismaService,
@@ -217,6 +225,7 @@ describe('OneTimeTokenService', () => {
       prisma as unknown as PrismaService,
       config,
       { send: vi.fn().mockResolvedValue({}) } as unknown as Mailer,
+      sms,
     );
     const base = {
       id: 5n,
@@ -245,6 +254,7 @@ describe('OneTimeTokenService', () => {
         prisma as unknown as PrismaService,
         { get: (k: string) => vars[k] } as unknown as ConfigService,
         { send: vi.fn().mockResolvedValue({}) } as unknown as Mailer,
+        sms,
       );
     expect(
       make({ EXPOSE_DEV_TOKENS: 'true' }).deliver(
@@ -273,6 +283,7 @@ describe('OneTimeTokenService', () => {
       prisma as unknown as PrismaService,
       { get: (k: string) => vars[k] } as unknown as ConfigService,
       { send } as unknown as Mailer,
+      sms,
     );
     tokens.deliver('PASSWORD_RESET', 'a@b.c', 'abc123');
     expect(send).toHaveBeenCalledTimes(1);

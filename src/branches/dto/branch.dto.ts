@@ -3,11 +3,14 @@ import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
+  IsIn,
+  IsInt,
   IsOptional,
   IsString,
   Length,
   Matches,
   MaxLength,
+  Min,
 } from 'class-validator';
 import {
   lowerTrim,
@@ -100,3 +103,17 @@ export class CreateBranchDto {
 }
 
 export class UpdateBranchDto extends PartialType(CreateBranchDto) {}
+
+/** Branch roles: ADMIN runs the branch (admin portal), FACULTY teaches there. */
+export const BRANCH_STAFF_ROLES = ['ADMIN', 'FACULTY'] as const;
+export type BranchStaffRole = (typeof BRANCH_STAFF_ROLES)[number];
+
+export class AddBranchStaffDto {
+  @IsInt()
+  @Min(1)
+  userId: number;
+
+  /** ADMIN: only the head office (super admin) can add one. FACULTY: the user needs the FACULTY role. */
+  @IsIn(BRANCH_STAFF_ROLES)
+  role: BranchStaffRole;
+}

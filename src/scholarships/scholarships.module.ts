@@ -13,7 +13,14 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../common/auth.js';
-import { CurrentUser, Public, RoleCode, Roles } from '../common/auth.js';
+import {
+  BRANCH_ADMIN,
+  CurrentUser,
+  Public,
+  RoleCode,
+  Roles,
+} from '../common/auth.js';
+import { AccessService } from '../common/access.service.js';
 import { ScholarshipsService } from './scholarships.service.js';
 import {
   CreateScholarshipTestDto,
@@ -25,7 +32,10 @@ import {
 @ApiTags('Scholarship tests')
 @Controller()
 export class ScholarshipsController {
-  constructor(private readonly scholarships: ScholarshipsService) {}
+  constructor(
+    private readonly scholarships: ScholarshipsService,
+    private readonly access: AccessService,
+  ) {}
 
   /** The test currently taking registrations (for the website), or null. */
   @Public()
@@ -126,11 +136,15 @@ export class ScholarshipsController {
     return this.scholarships.publish(BigInt(id));
   }
 
-  /** Scholarships a student can still use on a fee invoice. */
+  /** Scholarships a student can still use on a fee invoice (branch admins: students they can see). */
   @ApiBearerAuth()
-  @Roles(RoleCode.ADMIN)
+  @Roles(RoleCode.ADMIN, BRANCH_ADMIN)
   @Get('students/:userId/scholarships')
-  available(@Param('userId', ParseIntPipe) userId: number) {
+  async available(
+    @Param('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    await this.access.assertCanManageUser(user, BigInt(userId));
     return this.scholarships.availableAwards(BigInt(userId));
   }
 }

@@ -589,6 +589,7 @@ export class ScholarshipsService {
             ? `You ranked ${r.rank} in ${t.title} and won ${r.discount_percent}% off your course fees${t.valid_until ? `, valid until ${t.valid_until.toISOString().slice(0, 10)}` : ''}.`
             : `You ranked ${r.rank} in ${t.title}. See your score in the student portal.`,
         linkUrl: `/student/scholarships?test=${id}`,
+        email: true,
       });
     }
     return this.results(id);
