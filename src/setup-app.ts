@@ -46,7 +46,11 @@ export function setupApp(app: INestApplication): INestApplication {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  app.enableCors({ origin: origins.length ? origins : false });
+  app.enableCors({
+    origin: origins.length ? origins : false,
+    // Lets the website read the file name of CSV downloads (exports).
+    exposedHeaders: ['Content-Disposition'],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
