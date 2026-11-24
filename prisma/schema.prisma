@@ -521,6 +521,9 @@ model faculty_profiles {
   qualification  String?          @db.VarChar(255)
   specialization String?          @db.VarChar(255)
   biography      String?          @db.Text
+  /// Subjects shown as chips on the public website card (JSON array of strings), set by an admin.
+  /// NULL or empty: the website lists the subjects of the teacher's batch assignments.
+  display_subjects Json?
   joined_on      DateTime?        @db.Date
   created_at     DateTime         @default(now())
   updated_at     DateTime         @default(now())

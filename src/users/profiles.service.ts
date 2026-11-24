@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuthUser, isAdmin, isBranchAdmin } from '../common/auth.js';
 import { AccessService } from '../common/access.service.js';
@@ -16,6 +17,7 @@ const publicFacultySelect = {
   qualification: true,
   specialization: true,
   biography: true,
+  display_subjects: true,
   users: { select: { full_name: true, photo_url: true } },
   // Subjects they teach, one row per batch assignment (the website de-duplicates them).
   batch_faculty: { select: { subjects: { select: { name: true } } } },
@@ -142,6 +144,13 @@ export class ProfilesService {
         qualification: dto.qualification,
         specialization: dto.specialization,
         biography: dto.biography,
+        // An empty list clears it, so the website falls back to the batch subjects.
+        display_subjects:
+          dto.subjects === undefined
+            ? undefined
+            : dto.subjects.length
+              ? dto.subjects
+              : Prisma.DbNull,
         employee_code: dto.employeeCode,
         joined_on: dto.joinedOn,
       },

@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   ArrayUnique,
   IsArray,
@@ -172,6 +173,24 @@ export class FacultySelfProfileDto {
   @IsString()
   @MaxLength(5000)
   biography?: string;
+
+  /**
+   * Subjects shown as chips on the teacher's website card, in this order (teachers set their own,
+   * admins anyone's). An empty list goes back to the subjects of their batch assignments.
+   * @example ["Physics", "Mechanics", "JEE Main"]
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @Transform(({ value }: { value: unknown }) =>
+    Array.isArray(value)
+      ? value.map((v) => (typeof v === 'string' ? v.trim() : v))
+      : value,
+  )
+  @IsString({ each: true })
+  @Length(1, 40, { each: true })
+  @ArrayUnique((s: string) => s.toLowerCase())
+  subjects?: string[];
 }
 
 export class AdminFacultyProfileDto extends FacultySelfProfileDto {
