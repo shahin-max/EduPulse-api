@@ -66,6 +66,40 @@ describe('Faculty website subjects (e2e)', () => {
         .expect(400);
   });
 
+  it('repairs a Faculty role that has no profile when the roles are saved again', async () => {
+    // The state that once broke "Add as faculty" in prod: the role was added outside the app.
+    const admin = await createUser(ctx, ['ADMIN']);
+    const id = BigInt(admin.id);
+    await ctx.prisma.user_roles.create({
+      data: {
+        users: { connect: { id } },
+        roles: { connect: { code: 'FACULTY' } },
+      },
+    });
+    expect(
+      await ctx.prisma.faculty_profiles.count({ where: { user_id: id } }),
+    ).toBe(0);
+
+    // A duplicate role is refused (what the old button sent)...
+    await ctx
+      .http()
+      .put(api(`/users/${admin.id}/roles`))
+      .set(bearer(t.admin))
+      .send({ roles: ['ADMIN', 'FACULTY', 'FACULTY'] })
+      .expect(400);
+    // ...each role once (what the button sends now) creates the missing profile.
+    const res = await ctx
+      .http()
+      .put(api(`/users/${admin.id}/roles`))
+      .set(bearer(t.admin))
+      .send({ roles: ['ADMIN', 'FACULTY'] })
+      .expect(200);
+    expect(res.body.faculty_profiles).not.toBeNull();
+    expect(
+      await ctx.prisma.faculty_profiles.count({ where: { user_id: id } }),
+    ).toBe(1);
+  });
+
   it('lets teachers set their own chips', async () => {
     await ctx
       .http()
