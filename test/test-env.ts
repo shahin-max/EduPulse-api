@@ -36,6 +36,19 @@ export function loadTestEnv(): Record<string, string> {
     'CLOUDINARY_API_SECRET',
   ])
     env[key] = '';
+  // The same .env may hold a real SMTP server and SMS provider: blank them too, so the suites only
+  // log emails and SMS (password resets, verifications, notification copies) instead of sending them.
+  for (const key of [
+    'SMTP_URL',
+    'SMS_PROVIDER',
+    'TWILIO_ACCOUNT_SID',
+    'TWILIO_AUTH_TOKEN',
+    'TWILIO_FROM',
+    'MSG91_AUTH_KEY',
+    'MSG91_TEMPLATE_PASSWORD_RESET',
+    'MSG91_TEMPLATE_MOBILE_VERIFY',
+  ])
+    env[key] = '';
   // A developer's .env may close the portals for a staged launch; the suites expect them open
   // (the staged-launch suite switches it on itself).
   env.PORTALS_OPEN ??= 'all';
